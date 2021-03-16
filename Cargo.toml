@@ -1,0 +1,17 @@
+[package]
+name = "rperf"
+version = "0.0.1"
+description = "iperf, but meant for real-world conditions and analytics"
+authors = ["Neil Tallim <neiltallim@3d-p.com>"]
+edition = "2018"
+repository = "https://gitlab.3d-p.com/neiltallim/rperf"
+license = "<undefined>"
+keywords = ["network", "performance", "tcp", "udp", "sctp"]
+categories = ["network-utilities"]
+readme = "README.md"
+
+[dependencies]
+clap = {version = "3.0.0-beta.2", default-features = false}
+env_logger = "0.8"
+serde_json = "1.0"
+uuid = {version = "0.8", features = ["v4"]}
