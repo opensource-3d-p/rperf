@@ -22,16 +22,6 @@ fn main() {
                 .default_value("5201")
         )
         .arg(
-            Arg::with_name("format")
-                .help("the format in which to deplay information (json, megabit/sec, megabyte/sec)")
-                .takes_value(true)
-                .long("format")
-                .short("f")
-                .required(false)
-                .default_value("json")
-                .possible_values(&["json", "bit", "byte"]),
-        )
-        .arg(
             Arg::with_name("interval")
                 .help("the number of seconds to wait before producing periodic status reports; 0.0 to disable")
                 .takes_value(true)
@@ -48,15 +38,6 @@ fn main() {
                 .short("i")
                 .required(false)
                 .default_value("0.0")
-        )
-        .arg(
-            Arg::with_name("file")
-                .help("a file to use as either a data-source or buffer, depending on direction of traffic; if unspecified, transient data will be used instead")
-                .takes_value(true)
-                .long("file")
-                .short("F")
-                .required(false)
-                .default_value("")
         )
         .arg(
             Arg::with_name("file")
@@ -112,15 +93,6 @@ fn main() {
                 .required(false)
                 .conflicts_with("client")
         )
-        .arg(
-            Arg::with_name("buffertime")
-                .help("the number of seconds to retain testing results, for clients that get disconnected before retrieval")
-                .takes_value(true)
-                .long("buffertime")
-                .required(false)
-                .default_value("60.0")
-                .conflicts_with("client")
-        )
         
         
         .arg(
@@ -131,6 +103,17 @@ fn main() {
                 .short("c")
                 .required(false)
                 .default_value("")
+                .conflicts_with("server")
+        )
+        .arg(
+            Arg::with_name("format")
+                .help("the format in which to deplay information (json, megabit/sec, megabyte/sec)")
+                .takes_value(true)
+                .long("format")
+                .short("f")
+                .required(false)
+                .default_value("json")
+                .possible_values(&["json", "bit", "byte"]),
                 .conflicts_with("server")
         )
         .arg(
