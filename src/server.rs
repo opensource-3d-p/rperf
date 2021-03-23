@@ -13,6 +13,8 @@ mod server {
     
     let mut alive = true;
     
+    //TODO: use a read/write timeout
+    
     fn handle_client(mut stream: TcpStream, mut &clients: HashSet<String>) {
         //TODO: if alive becomes false, send the "bye" directive to the client and disconnect immediately
         

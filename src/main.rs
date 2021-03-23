@@ -1,9 +1,12 @@
+#[macro_use]
+extern crate log;
+
 use clap::{App, Arg};
 
 fn main() {
     
     
-    let matches = App::new("MyApp")
+    let matches = App::new("rperf")
         .arg(
             Arg::with_name("version")
                 .help("display version")
@@ -22,31 +25,12 @@ fn main() {
                 .default_value("5201")
         )
         .arg(
-            Arg::with_name("interval")
-                .help("the number of seconds to wait before producing periodic status reports; 0.0 to disable")
+            Arg::with_name("controltimeout")
+                .help("the number of seconds to wait before assuming the control-channel has been broken")
                 .takes_value(true)
-                .long("interval")
-                .short("i")
+                .long("control-timeout")
                 .required(false)
-                .default_value("0.0")
-        )
-        .arg(
-            Arg::with_name("interval")
-                .help("the number of seconds to wait before producing periodic status reports; 0.0 to disable")
-                .takes_value(true)
-                .long("interval")
-                .short("i")
-                .required(false)
-                .default_value("0.0")
-        )
-        .arg(
-            Arg::with_name("file")
-                .help("a file to use as either a data-source or buffer, depending on direction of traffic; if unspecified, transient data will be used instead")
-                .takes_value(true)
-                .long("file")
-                .short("F")
-                .required(false)
-                .default_value("")
+                .default_value("2.5")
         )
         .arg(
             Arg::with_name("affinity")
@@ -117,6 +101,16 @@ fn main() {
                 .conflicts_with("server")
         )
         .arg(
+            Arg::with_name("interval")
+                .help("the number of seconds to wait between periodic status reports in non-JSON modes; 0 to disable")
+                .takes_value(true)
+                .long("interval")
+                .short("i")
+                .required(false)
+                .default_value("0")
+                .conflicts_with("server")
+        )
+        .arg(
             Arg::with_name("udp")
                 .help("use UDP rather than TCP")
                 .takes_value(false)
@@ -137,7 +131,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("time")
-                .help("the time in seconds for which to transmit, as an alternative to bytes and block-count; time is used by default")
+                .help("the time in seconds for which to transmit, as an alternative to bytes; time is used by default")
                 .takes_value(true)
                 .long("time")
                 .short("t")
@@ -148,17 +142,8 @@ fn main() {
                 .conflicts_with("blockcount")
         )
         .arg(
-            Arg::with_name("omit")
-                .help("omit a number of seconds from the start of calculations, in non-JSON modes, to avoid including TCP ramp-up in averages")
-                .takes_value(true)
-                .long("omit")
-                .short("O")
-                .default_value("0.0")
-                .required(false)
-        )
-        .arg(
             Arg::with_name("bytes")
-                .help("the number of bytes to transmit, as an alternative to time and block-count")
+                .help("the number of bytes to transmit, as an alternative to time")
                 .takes_value(true)
                 .long("time")
                 .short("t")
@@ -169,16 +154,13 @@ fn main() {
                 .conflicts_with("blockcount")
         )
         .arg(
-            Arg::with_name("blockcount")
-                .help("the number of blocks (packets) to transmit, as an alternative to time and bytes")
+            Arg::with_name("omit")
+                .help("omit a number of seconds from the start of calculations, in non-JSON modes, to avoid including TCP ramp-up in averages")
                 .takes_value(true)
-                .long("blockcount")
-                .short("k")
+                .long("omit")
+                .short("O")
+                .default_value("0.0")
                 .required(false)
-                .default_value("0")
-                .conflicts_with("server")
-                .conflicts_with("time")
-                .conflicts_with("bytes")
         )
         .arg(
             Arg::with_name("length")
@@ -235,7 +217,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("nodelay")
-                .help("use no-dlay mode for TCP tests, deisabling Nagle's Algorithm")
+                .help("use no-delay mode for TCP tests, deisabling Nagle's Algorithm")
                 .takes_value(false)
                 .long("no-delay")
                 .short("N")
@@ -281,14 +263,6 @@ fn main() {
                 .long("flowlabel")
                 .short("L")
                 .default_value("0")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("zerocopy")
-                .help("use a zero-copy mode of sending data, like sendfile, to reduce transmission latency")
-                .takes_value(false)
-                .long("zerocopy")
-                .short("Z")
                 .required(false)
         )
     .get_matches();

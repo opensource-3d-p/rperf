@@ -1,3 +1,9 @@
+#[macro_use]
+extern crate log;
+
+
+
+
 use std::net::{TcpStream};
 use std::io::{Read, Write};
 use std::str::from_utf8;
