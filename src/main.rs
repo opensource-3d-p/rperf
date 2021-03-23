@@ -58,14 +58,6 @@ fn main() {
                 .short("d")
                 .required(false)
         )
-        .arg(
-            Arg::with_name("resolution")
-                .help("the target resolution for calculations, in Hz")
-                .takes_value(true)
-                .long("resolution")
-                .required(false)
-                .default_value("0.125")
-        )
         
         
         .arg(
@@ -137,9 +129,8 @@ fn main() {
                 .short("t")
                 .required(false)
                 .default_value("10.0")
-                .conflicts_with("server")
                 .conflicts_with("bytes")
-                .conflicts_with("blockcount")
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("bytes")
@@ -149,9 +140,8 @@ fn main() {
                 .short("t")
                 .required(false)
                 .default_value("0")
-                .conflicts_with("server")
                 .conflicts_with("time")
-                .conflicts_with("blockcount")
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("omit")
@@ -161,6 +151,7 @@ fn main() {
                 .short("O")
                 .default_value("0.0")
                 .required(false)
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("length")
@@ -171,16 +162,6 @@ fn main() {
                 .required(false)
                 .default_value("0")
                 .conflicts_with("server")
-                .conflicts_with("time")
-                .conflicts_with("bytes")
-        )
-        .arg(
-            Arg::with_name("cport")
-                .help("bind the client data-stream to a specific port (default is to let the OS choose one)")
-                .takes_value(true)
-                .long("cport")
-                .required(false)
-                .default_value("0")
         )
         .arg(
             Arg::with_name("parallel")
@@ -190,6 +171,7 @@ fn main() {
                 .short("P")
                 .required(false)
                 .default_value("1")
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("reverse")
@@ -198,6 +180,7 @@ fn main() {
                 .long("reverse")
                 .short("R")
                 .required(false)
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("window")
@@ -206,6 +189,7 @@ fn main() {
                 .long("window")
                 .short("w")
                 .required(false)
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("mss")
@@ -214,6 +198,7 @@ fn main() {
                 .long("mss")
                 .short("M")
                 .required(false)
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("nodelay")
@@ -222,6 +207,7 @@ fn main() {
                 .long("no-delay")
                 .short("N")
                 .required(false)
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("congestion")
@@ -230,40 +216,25 @@ fn main() {
                 .long("congestion")
                 .short("C")
                 .required(false)
-        )
-        .arg(
-            Arg::with_name("version4")
-                .help("use IPv4, instead of the system default")
-                .takes_value(false)
-                .long("version4")
-                .short("4")
-                .required(false)
+                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("version6")
-                .help("use IPv6, instead of the system default")
+                .help("use IPv6")
                 .takes_value(false)
                 .long("version6")
                 .short("6")
                 .required(false)
+                .conflicts_with("server")
         )
         .arg(
-            Arg::with_name("tos")
-                .help("set the IP type-of-service flag")
+            Arg::with_name("sendinterval")
+                .help("the interval at which to send data, in seconds")
                 .takes_value(true)
-                .long("tos")
-                .short("S")
-                .default_value("0")
+                .long("send-interval")
                 .required(false)
-        )
-        .arg(
-            Arg::with_name("flowlabel")
-                .help("set the IPv6 flow-label")
-                .takes_value(true)
-                .long("flowlabel")
-                .short("L")
-                .default_value("0")
-                .required(false)
+                .default_value("0.125")
+                .conflicts_with("server")
         )
     .get_matches();
     

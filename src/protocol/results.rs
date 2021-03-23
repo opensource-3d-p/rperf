@@ -3,6 +3,8 @@ extern crate log;
 
 
 struct UdpReceiveResult {
+    duration: f64,
+    
     bytes_received: u64,
     packets_received: u64,
     lost_packets: i64,
@@ -14,6 +16,8 @@ struct UdpReceiveResult {
 }
 
 struct UdpSendResult {
-
+    duration: f64,
+    
+    bytes_sent: u64,
+    packets_sent: u64,
 }
-

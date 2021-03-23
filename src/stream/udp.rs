@@ -4,6 +4,7 @@ extern crate log;
 
 use std::fmt::{format};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::thread::{sleep};
 
 use chrono::{NaiveDateTime};
 
@@ -23,6 +24,8 @@ pub struct UdpTestDefinition {
     pub bytes: u64,
     //the length of the buffer to exchange
     pub length: u16,
+    //the interval, in seconds, at which to send data
+    pub send_interval: f32,
 }
 
 mod receiver {
@@ -53,7 +56,7 @@ mod receiver {
         framing_size: u64,
     }
     pub impl UdpReceiver {
-        pub fn new(td: &UdpTestDefinition, ip_version:&u8, port:&u16, test_definition:UdpTestDefinition) -> Result<UdpReceiver> {
+        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16) -> Result<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u64;
             if ip_version == 4 {
@@ -91,9 +94,13 @@ mod receiver {
                 mio_poll_token: mio_poll_token,
                 mio_poll: mio_poll,
                 
-                //differentiate between IPv4 and IPv6 headers
                 framing_size: framing_size,
             })
+        }
+        
+        pub fn get_port(&self) -> Result<u16> {
+            let sock_addr = self.socket.local_addr()?;
+            Ok(sock_addr.port())
         }
         
         pub fn stop(&mut self) {
@@ -130,7 +137,7 @@ mod receiver {
             //it works on an assumption that the timestamp delta between sender and receiver
             //will remain effectively constant during the testing window
             
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before Unix epoch");
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
             let current_timestamp = NaiveDateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos());
             
             let time_delta = current_timestamp - timestamp;
@@ -161,7 +168,7 @@ mod receiver {
             //the first eight bytes are the packet's ID, in big-endian order
             let packet_id = u64::from_be_bytes(&packet[0..8]);
             
-            //nothing else in the packet actually matters
+            //except for the timestamp, nothing else in the packet actually matters
             
             self.history.packets_received += 1;
             if self.process_packets_ordering(&packet_id) {
@@ -192,12 +199,13 @@ mod receiver {
             let initial_duplicate_packets = self.history.duplicate_packets;
             
             let start = Instant::now();
+            
             while self.active {
                 self.poll.poll(&mut events, Some(POLL_TIMEOUT))?;
                 for event in events.iter() {
                     match event.token() {
                         self.mio_poll_token => loop {
-                            match socket.recv(&mut buf) {
+                            match self.socket.recv(&mut buf) {
                                 Ok(packet_size) => {
                                     if packet.length() < 20 { //rperf's protocol data is 20 bytes in size
                                         error!("received malformed packet with size {}", packet_size);
@@ -208,8 +216,11 @@ mod receiver {
                                     
                                     self.process_packet(&buf);
                                     
-                                    if start.elapsed() >= UPDATE_INTERVAL {
+                                    let elapsed_time = start.elapsed();
+                                    if elapsed_time >= UPDATE_INTERVAL {
                                         return Some(Ok(UdpReceiveResult{
+                                            duration: elapsed_time.as_secs_f64(),
+                                            
                                             bytes_received: bytes_received,
                                             packets_received: self.history.packets_received - initial_packets_received,
                                             lost_packets: self.history.lost_packets - initial_lost_packets,
@@ -220,13 +231,13 @@ mod receiver {
                                             jitter_seconds: self.history.jitter_seconds,
                                         }))
                                     }
-                                }
+                                },
                                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => { //receive timeout
                                     break;
-                                }
+                                },
                                 Err(e) => {
                                     return Some(Err(e));
-                                }
+                                },
                             }
                         },
                         _ => {
@@ -237,6 +248,8 @@ mod receiver {
             }
             if bytes_received > 0 {
                 Some(Ok(UdpReceiveResult{
+                    duration: start.elapsed().as_secs_f64(),
+                    
                     bytes_received: bytes_received,
                     packets_received: self.history.packets_received - initial_packets_received,
                     lost_packets: self.history.lost_packets - initial_lost_packets,
@@ -255,153 +268,131 @@ mod receiver {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-const SENDER: Token = Token(0);
-const ECHOER: Token = Token(1);
-
-// This operation will fail if the address is in use, so we select different ports for each
-// socket.
-let mut sender_socket = UdpSocket::bind("127.0.0.1:0".parse()?)?;
-
-// If we do not use connect here, SENDER and ECHOER would need to call send_to and recv_from
-// respectively.
-sender_socket.connect(echoer_socket.local_addr()?)?;
-
-// We need a Poll to check if SENDER is ready to be written into, and if ECHOER is ready to be
-// read from.
-let mut poll = Poll::new()?;
-
-// We register our sockets here so that we can check if they are ready to be written/read.
-poll.registry().register(&mut sender_socket, SENDER, Interest::WRITABLE)?;
-
-
-let msg_to_send = [9; 9];
-let mut buffer = [0; 9];
-
-let mut events = Events::with_capacity(128);
-loop {
-    poll.poll(&mut events, Some(Duration::from_millis(100)))?;
-    for event in events.iter() {
-        match event.token() {
-            // Our SENDER is ready to be written into.
-            SENDER => {
-                let bytes_sent = sender_socket.send(&msg_to_send)?;
-                assert_eq!(bytes_sent, 9);
-                println!("sent {:?} -> {:?} bytes", msg_to_send, bytes_sent);
-            },
-            // Our ECHOER is ready to be read from.
-            ECHOER => {
-                let num_recv = echoer_socket.recv(&mut buffer)?;
-                println!("echo {:?} -> {:?}", buffer, num_recv);
-                buffer = [0; 9];
-            }
-            _ => unreachable!()
-        }
-    }
-}
-
-
-
-
-
-
-
-
-
-
-fn send(socket: &net::UdpSocket, receiver: &str, msg: &Vec<u8>) -> usize {
-
-    println!("sending data");
-    let result = socket.send_to(msg, receiver).expect("failed to send message");
-
-    result
-}
-
-fn init_host(host: &str) -> net::UdpSocket {
-
-    println!("initializing host");
-    let socket = net::UdpSocket::bind(host).expect("failed to bind host socket");
-
-    socket
-}
-
-fn main() {
-
-    let host_arg = env::args().nth(1).unwrap();
-    let client_arg = env::args().nth(2).unwrap();
-
-    // TODO(alex): Currently hangs on listening, there must be a way to set a timeout, simply
-    // setting the timeout to true did not work.
-    let mut buf: Vec<u8> = Vec::with_capacity(100);
-    let socket = init_host(&host_arg);
-    let message = String::from("hello");
-    let msg_bytes = message.into_bytes();
-
-    loop {
-        while listen(&socket, &mut buf) != 0 {
-            println!("boo");
-        }
-        send(&socket, &client_arg, &msg_bytes);
-    }
-}
-
 mod sender {
-    
+    pub struct UdpSender {
+        active: bool,
+        test_definition: UdpTestDefinition,
+        
+        mut socket: UdpSocket,
+        
+        //the fixed number of bytes that frame each packet
+        framing_size: u64,
+        
+        mut remaining_bytes u64,
+        mut next_packet_id: u64,
+        mut staged_packet: [u8],
+    }
+    pub impl UdpSender {
+        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16) -> Result<UdpSender> {
+            let socket:UdpSocket;
+            let framing_size:u64;
+            if ip_version == 4 {
+                framing_size = 28;
+                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect("failed to bind socket");
+            } else if ip_version == 6 {
+                framing_size = 48;
+                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect("failed to bind socket");
+            } else {
+                return Err(format!("unsupported IP version: {}", ip_version));
+            }
+            socket.connect(format!("{}:{}", receiver_host, receiver_port))?;
+            
+            let mut staged_packet = [u8; test_definition.length];
+            for i in 0..(staged_packet.len()) { //fill the packet with a fixed sequence
+                staged_packet[i] = i %256;
+            }
+            
+            Ok(UdpSender{
+                active: true,
+                test_definition: test_definition,
+                
+                socket: socket,
+                
+                framing_size: framing_size,
+                
+                remaining_bytes: test_definition.bytes,
+                next_packet_id: 0,
+                staged_packet: staged_packet,
+            })
+        }
+        
+        pub fn get_port(&self) -> Result<u16> {
+            let sock_addr = self.socket.local_addr()?;
+            Ok(sock_addr.port())
+        }
+        
+        pub fn stop(&mut self) {
+            self.active = false;
+        }
+        
+        fn prepare_packet(&mut self) {
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
+            
+            //the first eight bytes are the packet's ID, in big-endian order
+            self.staged_packet[..8].copy_from_slice(self.next_packet_id.to_be_bytes());
+            
+            //the next eight are the seconds part of the UNIX timestamp and the following four are the nanoseconds
+            self.staged_packet[8..16].copy_from_slice(now.as_secs().to_be_bytes());
+            self.staged_packet[16..20].copy_from_slice(now.subsec_nanos().to_be_bytes());
+            
+            //prepare for the next packet
+            self.next_packet_id += 1;
+        }
+    }
+    impl Iterator for UdpSender {
+        fn next(&self) -> Option<Result<UdpSentResult>> {
+            let interval_duration = Duration::from_secs_f32(self.test_definition.send_interval);
+            let bytes_per_interval = ((self.test_definition.throughput as f64) * self.test_definition.send_interval) as u64;
+            let mut bytes_per_interval_remaining = bytes_per_interval;
+            
+            let mut packets_sent:u64 = 0;
+            let mut bytes_sent:u64 = 0;
+            
+            let start = Instant::now();
+            
+            while self.active {
+                self.prepare_packet();
+                match self.socket.send(self.staged_packet) {
+                    Ok(packet_size) => {
+                        let bytes_written = packet_size + self.framing_size
+                        self.remaining_bytes -= bytes_written;
+                        bytes_sent += bytes_written;
+                        bytes_per_interval_remaining -= bytes_written;
+                        
+                        let elapsed_time = start.elapsed();
+                        if elapsed_time >= UPDATE_INTERVAL {
+                            return Some(Ok(UdpSendResult{
+                                duration: elapsed_time.as_secs_f64(),
+                                
+                                bytes_sent: bytes_sent,
+                                packets_sent: packets_sent,
+                            }))
+                        }
+                    },
+                    Err(e) => {
+                        return Some(Err(e));
+                    },
+                }
+                
+                if self.remaining_bytes < self.test_definition.length + self.framing_size {
+                    break; //sending any more would exceed the requested total
+                }
+                
+                if bytes_per_interval_remaining <= 0 {
+                    bytes_per_interval_remaining = bytes_per_interval;
+                    sleep(interval_duration);
+                }
+            }
+            if bytes_sent > 0 {
+                Some(Ok(UdpReceiveResult{
+                    duration: start.elapsed().as_secs_f64(),
+                    
+                    bytes_sent: bytes_sent,
+                    packets_sent: packets_sent,
+                }))
+            } else {
+                None
+            }
+        }
+    }
 }
-
-
-
-
-/*
-
-
-
-        
-        
-        
-        
-        
-        
-        
-        .arg(
-            Arg::with_name("tos")
-                .help("set the IP type-of-service flag")
-                .takes_value(true)
-                .long("tos")
-                .short("S")
-                .default_value("0")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("flowlabel")
-                .help("set the IPv6 flow-label")
-                .takes_value(true)
-                .long("flowlabel")
-                .short("L")
-                .default_value("0")
-                .required(false)
-        )
-
-
-
-
-*/
-
-
