@@ -1,10 +1,10 @@
-#[macro_use]
-extern crate log;
+#[macro_use] extern crate log;
+extern crate env_logger;
 
 use clap::{App, Arg};
 
 fn main() {
-    
+    env_logger::init();
     
     let matches = App::new("rperf")
         .arg(
@@ -89,7 +89,7 @@ fn main() {
                 .short("f")
                 .required(false)
                 .default_value("json")
-                .possible_values(&["json", "bit", "byte"]),
+                .possible_values(&["json", "bit", "byte"])
                 .conflicts_with("server")
         )
         .arg(
@@ -233,7 +233,7 @@ fn main() {
                 .takes_value(true)
                 .long("send-interval")
                 .required(false)
-                .default_value("0.125")
+                .default_value("0.01")
                 .conflicts_with("server")
         )
     .get_matches();
