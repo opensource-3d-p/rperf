@@ -1,6 +1,5 @@
 #[macro_use] extern crate log;
 
-
 use std::fmt::{format};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::thread::{sleep};
@@ -8,7 +7,7 @@ use std::thread::{sleep};
 use chrono::{NaiveDateTime};
 
 use mio::net::UdpSocket;
-use mio::{Events, Interest, Poll, Token};
+use mio::{Events, Interest, Poll, PollOpt, Ready, Token};
 
 use protocol::results::{UdpReceiveResult, UdpSendResult};
 
@@ -60,17 +59,22 @@ mod receiver {
             let framing_size:u64;
             if ip_version == 4 {
                 framing_size = 28;
-                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect("failed to bind socket");
+                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port)));
             } else if ip_version == 6 {
                 framing_size = 48;
-                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect("failed to bind socket");
+                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port)));
             } else {
                 return Err(format!("unsupported IP version: {}", ip_version));
             }
             
             let mio_poll_token = Token(0);
             let mut mio_poll = Poll::new()?;
-            mio_poll.registry().register(&mut socket, mio_poll_token, Interest::READABLE)?;
+            mio_poll.register(
+                &socket,
+                mio_poll_token,
+                Ready::readable(),
+                PollOpt::edge(),
+            )?;
             
             Ok(UdpReceiver{
                 active: true,

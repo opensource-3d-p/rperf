@@ -20,3 +20,8 @@ struct UdpSendResult {
     bytes_sent: u64,
     packets_sent: u64,
 }
+
+//TODO: functions to assemble UDP results into something complete
+//or maybe multiple outputs: one after each transmission cycle and one after each receipt
+//with a running tally for the final output
+//client.rs should do the actual presentation step
