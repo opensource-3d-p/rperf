@@ -1,5 +1,6 @@
-#[macro_use] extern crate log;
+extern crate log;
 
+use std::error::Error;
 use std::fmt::{format};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::thread::{sleep};
@@ -7,9 +8,11 @@ use std::thread::{sleep};
 use chrono::{NaiveDateTime};
 
 use mio::net::UdpSocket;
-use mio::{Events, Interest, Poll, PollOpt, Ready, Token};
+use mio::{Events, Ready, Poll, PollOpt, Token};
 
 use protocol::results::{UdpReceiveResult, UdpSendResult};
+
+type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 //250ms timeout
 const POLL_TIMEOUT = Duration::new(0, 250_000_000);
@@ -54,13 +57,13 @@ mod receiver {
         framing_size: u64,
     }
     pub impl UdpReceiver {
-        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16) -> Result<UdpReceiver> {
+        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16) -> BoxResult<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u64;
-            if ip_version == 4 {
+            if *ip_version == 4 {
                 framing_size = 28;
                 socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port)));
-            } else if ip_version == 6 {
+            } else if *ip_version == 6 {
                 framing_size = 48;
                 socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port)));
             } else {
@@ -69,7 +72,7 @@ mod receiver {
             
             let mio_poll_token = Token(0);
             let mut mio_poll = Poll::new()?;
-            mio_poll.register(
+            mio_poll.registry().register(
                 &socket,
                 mio_poll_token,
                 Ready::readable(),
@@ -101,7 +104,7 @@ mod receiver {
             })
         }
         
-        pub fn get_port(&self) -> Result<u16> {
+        pub fn get_port(&self) -> BoxResult<u16> {
             let sock_addr = self.socket.local_addr()?;
             Ok(sock_addr.port())
         }
@@ -191,7 +194,7 @@ mod receiver {
         }
     }
     impl Iterator for UdpReceiver {
-        fn next(&self) -> Option<Result<UdpReceiveResult>> {
+        fn next(&self) -> Option<BoxResult<UdpReceiveResult>> {
             let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = [u8; self.test_definition.length];
             
@@ -286,7 +289,7 @@ mod sender {
         mut staged_packet: [u8],
     }
     pub impl UdpSender {
-        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16) -> Result<UdpSender> {
+        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16) -> BoxResult<UdpSender> {
             let socket:UdpSocket;
             let framing_size:u64;
             if ip_version == 4 {
@@ -319,7 +322,7 @@ mod sender {
             })
         }
         
-        pub fn get_port(&self) -> Result<u16> {
+        pub fn get_port(&self) -> BoxResult<u16> {
             let sock_addr = self.socket.local_addr()?;
             Ok(sock_addr.port())
         }
@@ -343,7 +346,7 @@ mod sender {
         }
     }
     impl Iterator for UdpSender {
-        fn next(&self) -> Option<Result<UdpSentResult>> {
+        fn next(&self) -> Option<BoxResult<UdpSentResult>> {
             let interval_duration = Duration::from_secs_f32(self.test_definition.send_interval);
             let bytes_per_interval = ((self.test_definition.throughput as f64) * self.test_definition.send_interval) as u64;
             let mut bytes_per_interval_remaining = bytes_per_interval;

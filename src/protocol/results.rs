@@ -1,4 +1,4 @@
-#[macro_use] extern crate log;
+extern crate log;
 
 
 struct UdpReceiveResult {
@@ -20,6 +20,16 @@ struct UdpSendResult {
     bytes_sent: u64,
     packets_sent: u64,
 }
+
+struct UdpStreamResult {
+    receive_result: UdpReceiveResult,
+    send_result: UdpSendResult,
+}
+
+struct UdpTestResult {
+    stream_results: Vec<UdpStreamResult>,
+}
+
 
 //TODO: functions to assemble UDP results into something complete
 //or maybe multiple outputs: one after each transmission cycle and one after each receipt

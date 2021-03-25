@@ -1,7 +1,12 @@
-#[macro_use] extern crate log;
+extern crate log;
 extern crate env_logger;
+extern crate lazy_static;
 
 use clap::{App, Arg};
+
+mod client;
+mod server;
+mod protocol;
 
 fn main() {
     env_logger::init();
@@ -72,16 +77,6 @@ fn main() {
         
         
         .arg(
-            Arg::with_name("client")
-                .help("run as a client to the specified server")
-                .takes_value(true)
-                .long("client")
-                .short("c")
-                .required(false)
-                .default_value("")
-                .conflicts_with("server")
-        )
-        .arg(
             Arg::with_name("format")
                 .help("the format in which to deplay information (json, megabit/sec, megabyte/sec)")
                 .takes_value(true)
@@ -136,8 +131,8 @@ fn main() {
             Arg::with_name("bytes")
                 .help("the number of bytes to transmit, as an alternative to time")
                 .takes_value(true)
-                .long("time")
-                .short("t")
+                .long("bytes")
+                .short("y")
                 .required(false)
                 .default_value("0")
                 .conflicts_with("time")
@@ -239,5 +234,33 @@ fn main() {
     .get_matches();
     
     
-    
+    if matches.is_present("server") {
+        ctrlc::set_handler(move || {
+            if server::kill() {
+                log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
+            } else {
+                log::warn!("forcing shutdown immediately");
+                std::process::exit(3);
+            }
+        }).expect("unable to set SIGINT handler");
+        
+        let service = server::serve(&(50002 as u16), &(4 as u8));
+        if service.is_err() {
+            log::error!("unable to run server: {:?}", service.unwrap_err());
+        }
+    } else {
+        ctrlc::set_handler(move || {
+            if client::kill() {
+                log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
+            } else {
+                log::warn!("forcing shutdown immediately");
+                std::process::exit(3);
+            }
+        }).expect("unable to set SIGINT handler");
+        
+        let execution = client::execute("127.0.0.1", &(50002 as u16), &(4 as u8));
+        if execution.is_err() {
+            log::error!("unable to run client: {:?}", execution.unwrap_err());
+        }
+    }
 }

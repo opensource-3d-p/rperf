@@ -11,11 +11,15 @@ categories = ["network-utilities"]
 readme = "README.md"
 
 [dependencies]
+chashmap = "2.2.2"
 chrono = "0.4"
 clap = "~2.33.3"
+ctrlc = "3.1.8"
 env_logger = "0.8"
+lazy_static = "1.4.0"
 libc = "0.2"
 log = { version = "0.4", features = ["std"] }
-mio = {version = "0.7", features = ["net"]}
+mio = "0.6"
 serde_json = "1.0"
+simple-error = "0.2"
 uuid = {version = "0.8", features = ["v4"]}
