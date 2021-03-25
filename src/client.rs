@@ -26,16 +26,6 @@ pub fn execute(server_address:&str, port:&u16, ip_version:&u8) -> BoxResult<()> 
     //TODO: send test details to server
     //if running in reverse-mode, also prepare the local streams/threads and include their details in this message
     
-    let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(
-        &stream,
-        mio_token,
-        Ready::readable(),
-        PollOpt::edge(),
-    )?;
-    let mut events = Events::with_capacity(1); //only connected to the server
-    
     while is_alive() {
         let payload_wrapped = receive(&mut stream, is_alive);
         if payload_wrapped.is_err() {

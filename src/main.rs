@@ -72,7 +72,6 @@ fn main() {
                 .long("server")
                 .short("s")
                 .required(false)
-                .conflicts_with("client")
         )
         
         
@@ -85,7 +84,6 @@ fn main() {
                 .required(false)
                 .default_value("json")
                 .possible_values(&["json", "bit", "byte"])
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("interval")
@@ -95,7 +93,6 @@ fn main() {
                 .short("i")
                 .required(false)
                 .default_value("0")
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("udp")
@@ -104,7 +101,6 @@ fn main() {
                 .long("udp")
                 .short("u")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("bandwidth")
@@ -114,7 +110,6 @@ fn main() {
                 .short("b")
                 .required(false)
                 .default_value("1000000")
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("time")
@@ -125,7 +120,6 @@ fn main() {
                 .required(false)
                 .default_value("10.0")
                 .conflicts_with("bytes")
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("bytes")
@@ -136,7 +130,6 @@ fn main() {
                 .required(false)
                 .default_value("0")
                 .conflicts_with("time")
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("omit")
@@ -146,7 +139,6 @@ fn main() {
                 .short("O")
                 .default_value("0.0")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("length")
@@ -156,7 +148,6 @@ fn main() {
                 .short("k")
                 .required(false)
                 .default_value("0")
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("parallel")
@@ -166,7 +157,6 @@ fn main() {
                 .short("P")
                 .required(false)
                 .default_value("1")
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("reverse")
@@ -175,7 +165,6 @@ fn main() {
                 .long("reverse")
                 .short("R")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("window")
@@ -184,7 +173,6 @@ fn main() {
                 .long("window")
                 .short("w")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("mss")
@@ -193,7 +181,6 @@ fn main() {
                 .long("mss")
                 .short("M")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("nodelay")
@@ -202,7 +189,6 @@ fn main() {
                 .long("no-delay")
                 .short("N")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("congestion")
@@ -211,7 +197,6 @@ fn main() {
                 .long("congestion")
                 .short("C")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("version6")
@@ -220,7 +205,6 @@ fn main() {
                 .long("version6")
                 .short("6")
                 .required(false)
-                .conflicts_with("server")
         )
         .arg(
             Arg::with_name("sendinterval")
@@ -229,12 +213,12 @@ fn main() {
                 .long("send-interval")
                 .required(false)
                 .default_value("0.01")
-                .conflicts_with("server")
         )
     .get_matches();
     
     
     if matches.is_present("server") {
+        debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if server::kill() {
                 log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
@@ -244,11 +228,13 @@ fn main() {
             }
         }).expect("unable to set SIGINT handler");
         
+        debug!("beginning normal operation...");
         let service = server::serve(&(50002 as u16), &(4 as u8));
         if service.is_err() {
             log::error!("unable to run server: {:?}", service.unwrap_err());
         }
     } else {
+        debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if client::kill() {
                 log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
@@ -258,6 +244,7 @@ fn main() {
             }
         }).expect("unable to set SIGINT handler");
         
+        debug!("connecting to server...");
         let execution = client::execute("127.0.0.1", &(50002 as u16), &(4 as u8));
         if execution.is_err() {
             log::error!("unable to run client: {:?}", execution.unwrap_err());
