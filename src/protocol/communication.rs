@@ -44,8 +44,17 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
                 _ => loop {
                     match stream.read(&mut length_spec[length_bytes_read..]) {
                         Ok(size) => {
+                            if size == 0 {
+                                if !alive_check() {
+                                    return Err(Box::new(simple_error::simple_error!("connection lost")));
+                                } else { //shutting down; a disconnect is expected
+                                    return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                                }
+                            }
+                            
                             length_bytes_read += size;
                             if length_bytes_read == 2 {
+                                poll.deregister(stream);
                                 return Ok(u16::from_be_bytes(length_spec));
                             }
                         },
@@ -82,10 +91,19 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) 
                 _ => loop {
                     match stream.read(&mut buffer[bytes_read..]) {
                         Ok(size) => {
+                            if size == 0 {
+                                if !alive_check() {
+                                    return Err(Box::new(simple_error::simple_error!("connection lost")));
+                                } else { //shutting down; a disconnect is expected
+                                    return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                                }
+                            }
+                            
                             bytes_read += size;
                             if bytes_read == length as usize {
                                 match serde_json::from_slice(&buffer) {
                                     Ok(v) => {
+                                        poll.deregister(stream);
                                         return Ok(v);
                                     },
                                     Err(e) => {

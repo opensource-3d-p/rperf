@@ -17,7 +17,7 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 const POLL_TIMEOUT:Duration = Duration::from_millis(500);
 
-const alive:AtomicBool = AtomicBool::new(true);
+static alive:AtomicBool = AtomicBool::new(true);
 
 lazy_static::lazy_static!{
     static ref clients:CHashMap<String, bool> = {
@@ -27,10 +27,11 @@ lazy_static::lazy_static!{
 }
 
 fn handle_client(mut stream:TcpStream) {
+    let peer_addr = stream.peer_addr().unwrap();
     while is_alive() {
         let payload = receive(&mut stream, is_alive);
         if payload.is_err() {
-            log::error!("lost connection to {}: {:?}", stream.peer_addr().unwrap(), payload.err());
+            log::error!("lost connection to {}: {:?}", peer_addr, payload.err());
             stream.shutdown(Shutdown::Both).unwrap_or_default();
             break;
         }
@@ -50,7 +51,7 @@ fn handle_client(mut stream:TcpStream) {
     
     //if any iterators are still running, kill them (this is because we may have disconnected from the server prematurely)
     
-    clients.remove(&stream.peer_addr().unwrap().to_string());
+    clients.remove(&peer_addr.to_string());
 }
 
 pub fn serve(port:&u16, ip_version:&u8) -> BoxResult<()> {
@@ -113,9 +114,7 @@ pub fn serve(port:&u16, ip_version:&u8) -> BoxResult<()> {
 }
 
 pub fn kill() -> bool {
-    let was_alive = is_alive();
-    alive.store(false, Ordering::Relaxed);
-    was_alive
+    alive.swap(false, Ordering::Relaxed)
 }
 fn is_alive() -> bool {
     alive.load(Ordering::Relaxed)

@@ -218,7 +218,7 @@ fn main() {
     
     
     if matches.is_present("server") {
-        debug!("registering SIGINT handler...");
+        log::debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if server::kill() {
                 log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
@@ -228,13 +228,13 @@ fn main() {
             }
         }).expect("unable to set SIGINT handler");
         
-        debug!("beginning normal operation...");
+        log::debug!("beginning normal operation...");
         let service = server::serve(&(50002 as u16), &(4 as u8));
         if service.is_err() {
             log::error!("unable to run server: {:?}", service.unwrap_err());
         }
     } else {
-        debug!("registering SIGINT handler...");
+        log::debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if client::kill() {
                 log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
@@ -244,7 +244,7 @@ fn main() {
             }
         }).expect("unable to set SIGINT handler");
         
-        debug!("connecting to server...");
+        log::debug!("connecting to server...");
         let execution = client::execute("127.0.0.1", &(50002 as u16), &(4 as u8));
         if execution.is_err() {
             log::error!("unable to run client: {:?}", execution.unwrap_err());

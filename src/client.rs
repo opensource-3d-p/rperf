@@ -11,7 +11,7 @@ use crate::protocol::messaging::{prepare_begin, prepare_end};
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
-const alive:AtomicBool = AtomicBool::new(true);
+static alive:AtomicBool = AtomicBool::new(true);
 
 pub fn execute(server_address:&str, port:&u16, ip_version:&u8) -> BoxResult<()> {
     log::info!("connecting to server at {}:{}...", server_address, port);
@@ -104,9 +104,7 @@ pub fn execute(server_address:&str, port:&u16, ip_version:&u8) -> BoxResult<()> 
 }
 
 pub fn kill() -> bool {
-    let was_alive = is_alive();
-    alive.store(false, Ordering::Relaxed);
-    was_alive
+    alive.swap(false, Ordering::Relaxed)
 }
 fn is_alive() -> bool {
     alive.load(Ordering::Relaxed)
