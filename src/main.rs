@@ -11,13 +11,22 @@ mod protocol;
 fn main() {
     env_logger::init();
     
-    let matches = App::new("rperf")
+    let args = App::new("rperf")
         .arg(
             Arg::with_name("version")
                 .help("display version")
                 .takes_value(false)
                 .long("version")
                 .short("v")
+                .required(false)
+        )
+        
+        .arg(
+            Arg::with_name("version6")
+                .help("use IPv6")
+                .takes_value(false)
+                .long("version6")
+                .short("6")
                 .required(false)
         )
         .arg(
@@ -29,14 +38,7 @@ fn main() {
                 .required(false)
                 .default_value("5201")
         )
-        .arg(
-            Arg::with_name("controltimeout")
-                .help("the number of seconds to wait before assuming the control-channel has been broken")
-                .takes_value(true)
-                .long("control-timeout")
-                .required(false)
-                .default_value("2.5")
-        )
+        
         .arg(
             Arg::with_name("affinity")
                 .help("specify logical CPUs, delimited by commas, across which to round-robin affinity; not supported on all systems")
@@ -46,14 +48,6 @@ fn main() {
                 .required(false)
                 .multiple(true)
                 .default_value("-1")
-        )
-        .arg(
-            Arg::with_name("verbose")
-                .help("provide more information with any non-JSON output")
-                .takes_value(false)
-                .long("verbose")
-                .short("V")
-                .required(false)
         )
         .arg(
             Arg::with_name("debug")
@@ -74,7 +68,22 @@ fn main() {
                 .required(false)
         )
         
-        
+        .arg(
+            Arg::with_name("client")
+                .help("run in client mode; value is the server's address")
+                .takes_value(true)
+                .long("client")
+                .short("c")
+                .required(false)
+        )
+        .arg(
+            Arg::with_name("reverse")
+                .help("run in reverse-mode (server sends, client receives)")
+                .takes_value(false)
+                .long("reverse")
+                .short("R")
+                .required(false)
+        )
         .arg(
             Arg::with_name("format")
                 .help("the format in which to deplay information (json, megabit/sec, megabyte/sec)")
@@ -142,10 +151,10 @@ fn main() {
         )
         .arg(
             Arg::with_name("length")
-                .help("length of the buffer to exchange; for TCP, this defaults to 128kilobytes; for UDP, it's based on MTU and IP family")
+                .help("length of the buffer to exchange; for TCP, this defaults to 128 kibibytes; for UDP, it's 1024 bytes ")
                 .takes_value(true)
-                .long("blockcount")
-                .short("k")
+                .long("length")
+                .short("l")
                 .required(false)
                 .default_value("0")
         )
@@ -159,14 +168,6 @@ fn main() {
                 .default_value("1")
         )
         .arg(
-            Arg::with_name("reverse")
-                .help("run in reverse-mode (server sends, client receives)")
-                .takes_value(false)
-                .long("reverse")
-                .short("R")
-                .required(false)
-        )
-        .arg(
             Arg::with_name("window")
                 .help("window-size, in bytes, for TCP tests")
                 .takes_value(false)
@@ -176,7 +177,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("mss")
-                .help("maximum segment-size, for TCP tests (default is based on MTU)")
+                .help("maximum segment-size, for TCP tests (default is 1024 bytes)")
                 .takes_value(false)
                 .long("mss")
                 .short("M")
@@ -184,7 +185,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("nodelay")
-                .help("use no-delay mode for TCP tests, deisabling Nagle's Algorithm")
+                .help("use no-delay mode for TCP tests, disabling Nagle's Algorithm")
                 .takes_value(false)
                 .long("no-delay")
                 .short("N")
@@ -192,18 +193,10 @@ fn main() {
         )
         .arg(
             Arg::with_name("congestion")
-                .help("use a specific congestion-control algorithm for traffic-shaping")
+                .help("use a specific TCP congestion-control algorithm for traffic-shaping")
                 .takes_value(false)
                 .long("congestion")
                 .short("C")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("version6")
-                .help("use IPv6")
-                .takes_value(false)
-                .long("version6")
-                .short("6")
                 .required(false)
         )
         .arg(
@@ -217,7 +210,7 @@ fn main() {
     .get_matches();
     
     
-    if matches.is_present("server") {
+    if args.is_present("server") {
         log::debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if server::kill() {
@@ -229,11 +222,11 @@ fn main() {
         }).expect("unable to set SIGINT handler");
         
         log::debug!("beginning normal operation...");
-        let service = server::serve(&(50002 as u16), &(4 as u8));
+        let service = server::serve(args);
         if service.is_err() {
             log::error!("unable to run server: {:?}", service.unwrap_err());
         }
-    } else {
+    } else if args.is_present("client") {
         log::debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if client::kill() {
@@ -245,9 +238,12 @@ fn main() {
         }).expect("unable to set SIGINT handler");
         
         log::debug!("connecting to server...");
-        let execution = client::execute("127.0.0.1", &(50002 as u16), &(4 as u8));
+        let execution = client::execute(args);
         if execution.is_err() {
             log::error!("unable to run client: {:?}", execution.unwrap_err());
         }
+    } else {
+        std::println!("{}", args.usage());
+        std::process::exit(2);
     }
 }

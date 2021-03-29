@@ -6,12 +6,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration};
 
+use chashmap::CHashMap;
+
+use clap::ArgMatches;
+
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Ready, Poll, PollOpt, Token};
 
-use chashmap::CHashMap;
-
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
+
+use crate::stream::tcp;
+use crate::stream::udp;
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
@@ -26,39 +31,109 @@ lazy_static::lazy_static!{
     };
 }
 
-fn handle_client(mut stream:TcpStream) {
-    let peer_addr = stream.peer_addr().unwrap();
+fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
+    let peer_addr = stream.peer_addr()?;
+    
+    let mut parallel_streams:Vec<crate::stream::TestStream>::new();
+    let mut parallel_streams_joinhandles:Vec::new();
+    
     while is_alive() {
-        let payload = receive(&mut stream, is_alive);
-        if payload.is_err() {
-            log::error!("lost connection to {}: {:?}", peer_addr, payload.err());
-            stream.shutdown(Shutdown::Both).unwrap_or_default();
-            break;
+        let payload = receive(&mut stream, is_alive)?;
+        match payload.get("kind") {
+            Some(kind) => {
+                match kind.as_str()? {
+                    "configuration" => { //we either need to connect streams to the client or prepare to receive connections
+                        if payload.get("role")?.as_str()? == "download" {
+                            log::!debug("running in forward-mode: server will be receiving data");
+                            
+                            let mut stream_ports = Vec::new();
+                            if payload.get("family")?.as_str()? == "udp" {
+                                let test_definition = udp::build_udp_test_definition(&payload)?;
+                                for i in 0..(payload.get("streams")?.as_i64()?) {
+                                    let test = Box::new(udp::UdpReceiver::new(test_definition.clone(), ip_version, &0)?);
+                                    parallel_streams.push(test);
+                                    stream_ports.push(test.get_port()?);
+                                }
+                            } else { //TCP
+                                
+                            }
+                            send(&mut stream, &prepare_connect(stream_ports))?;
+                        } else { //upload
+                            log::!debug("running in reverse-mode: server will be uploading data");
+                            
+                            if payload.get("family")?.as_str()? == "udp" {
+                                let test_definition = udp::build_udp_test_definition(&payload)?;
+                                for port in payload.get("streamPorts")?.as_array()? {
+                                    let test = Box::new(udp::UdpSender::new(test_definition, ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64()? as u16), payload["duration"].as_f64() as f32, payload["sendInterval"].as_f64() as f32)?);
+                                    parallel_streams.push(test);
+                                    stream_ports.push(test.get_port()?);
+                                }
+                            } else { //TCP
+                                
+                            }
+                            send(&mut stream, &prepare_connected())?;
+                        }
+                    },
+                    "begin" => {
+                        for parallel_stream in &parallel_streams {
+                            let handle = thread::spawn(|| {
+                                loop {
+                                    match parallel_stream.run_interval() {
+                                        Some(interval_result) => {
+                                            //write the result into an std::sync::mpsc instance, which another thread will harvest and forward to the client
+                                        },
+                                        None => break,
+                                    }
+                                }
+                            };
+                            parallel_streams_joinhandles.push(handle);
+                        }
+                    },
+                    "end" => {
+                        log::info!("end-signal from {}", stream.peer_addr()?);
+                        break;
+                    },
+                    _ => {
+                        log::error!("invalid data from {}", stream.peer_addr()?);
+                        break;
+                    },
+                }
+            },
+            None => {
+                log::error!("invalid data from {}", stream.peer_addr()?);
+                break;
+            },
         }
-        
-        //TODO: process payload
-        
-        //it will probably want to start a test, which entails spawning all of the parallel streams and giving them a callback function
-        //to write to the stream (this uses a queue that's managed by this thread; specifically, the queue should be passed to
-        //communication_get_length and communication_get_payload so they can dump into it between poll cycles)
-        //actually, it should be an Option<fn> closure so the function can just call it without any knowledge
-        
-        //std::sync::mpsc
-        
-        //meanwhile, this thread needs to continue to monitor for events, specifically "begin" and "end"
-        
     }
     
-    //if any iterators are still running, kill them (this is because we may have disconnected from the server prematurely)
+    //ensure everything has ended
+    for ps in parallel_streams {
+        ps.stop();
+    }
+    for jh in parallel_streams_joinhandles {
+        match jh.join() {
+            Ok(_) => (),
+            Err(e) => log::error!("error in parallel stream: {:?}", e),
+        }
+    }
     
     clients.remove(&peer_addr.to_string());
+    Ok(())
 }
 
-pub fn serve(port:&u16, ip_version:&u8) -> BoxResult<()> {
+pub fn serve(args:ArgMatches) -> BoxResult<()> {
+    let ip_version:u8;
+    if matches.is_present("version6") {
+        ip_version = 6;
+    } else {
+        ip_version = 4;
+    }
+    let port:u16 = args.value_of("port").unwrap().parse()?;
+    
     let mut listener:TcpListener;
-    if *ip_version == 4 {
+    if ip_version == 4 {
         listener = TcpListener::bind(&format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind TCP socket, port {}", port).as_str());
-    } else if *ip_version == 6 {
+    } else if ip_version == 6 {
         listener = TcpListener::bind(&format!(":::{}", port).parse()?).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     } else {
         return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
@@ -90,7 +165,11 @@ pub fn serve(port:&u16, ip_version:&u8) -> BoxResult<()> {
                             clients.insert(address.to_string(), false);
                             
                             thread::spawn(move || {
-                                handle_client(stream)
+                                match handle_client(stream, &ip_version) {
+                                    Ok(_) => (),
+                                    Err(e) => log::error!("error in client-handler: {:?}"),
+                                }
+                                stream.shutdown(Shutdown::Both).unwrap_or_default();
                             });
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => { //nothing to do

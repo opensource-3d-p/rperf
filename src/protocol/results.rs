@@ -1,8 +1,15 @@
 extern crate log;
 
+pub trait IntervalResult {
+    fn to_json(&self) -> serde_json::Value;
+    
+    fn to_json_string(&self) -> String {
+        serde_json::to_string(self.to_json()).unwrap()
+    }
+}
 
 struct UdpReceiveResult {
-    duration: f64,
+    duration: f32,
     
     bytes_received: u64,
     packets_received: u64,
@@ -13,12 +20,22 @@ struct UdpReceiveResult {
     unbroken_sequence: u64,
     jitter_seconds: Option<f32>,
 }
+impl IntervalResult for UdpReceiveResult {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({});
+    }
+}
 
 struct UdpSendResult {
     duration: f64,
     
     bytes_sent: u64,
     packets_sent: u64,
+}
+impl IntervalResult for UdpSendResult {
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({});
+    }
 }
 
 struct UdpStreamResult {
