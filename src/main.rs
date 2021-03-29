@@ -6,6 +6,7 @@ use clap::{App, Arg};
 
 mod client;
 mod server;
+mod stream;
 mod protocol;
 
 fn main() {

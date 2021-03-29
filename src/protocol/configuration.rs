@@ -1,6 +1,6 @@
 extern crate log;
 
-fn validate_streams(streams:u8) -> u8 {
+pub fn validate_streams(streams:u8) -> u8 {
     if streams > 0 {
         streams
     } else {
@@ -9,7 +9,7 @@ fn validate_streams(streams:u8) -> u8 {
     }
 }
 
-fn validate_bandwidth(bandwidth:u64) -> u64 {
+pub fn validate_bandwidth(bandwidth:u64) -> u64 {
     if bandwidth > 0 {
         bandwidth
     } else {
@@ -18,7 +18,7 @@ fn validate_bandwidth(bandwidth:u64) -> u64 {
     }
 }
 
-fn validate_send_interval(send_interval:f32) -> f32 {
+pub fn validate_send_interval(send_interval:f32) -> f32 {
     if send_interval > 0.0 {
         send_interval
     } else {
@@ -27,7 +27,7 @@ fn validate_send_interval(send_interval:f32) -> f32 {
     }
 }
 
-fn calculate_duration(bandwidth:u64, bytes:u64, seconds:f32) -> f32 {
+pub fn calculate_duration(bandwidth:u64, bytes:u64, seconds:f32) -> f32 {
     if bytes > 0 { //bytes were requested
         if bandwidth > 0 {
             ((bytes as f64) / (bandwidth as f64)) as f32
@@ -43,7 +43,7 @@ fn calculate_duration(bandwidth:u64, bytes:u64, seconds:f32) -> f32 {
     }
 }
 
-fn calculate_length_udp(length:u32) -> u32 {
+pub fn calculate_length_udp(length:u32) -> u32 {
     if length < crate::stream::udp::TEST_HEADER_SIZE { //length must be at least enough to hold the test data
         crate::stream::udp::TEST_HEADER_SIZE
     } else {

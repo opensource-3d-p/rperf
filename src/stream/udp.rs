@@ -1,24 +1,17 @@
 extern crate log;
 
 use std::error::Error;
-use std::fmt::{format};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::thread::{sleep};
+use std::time::{Duration};
 
-use chrono::{NaiveDateTime};
-
-use mio::net::UdpSocket;
-use mio::{Events, Ready, Poll, PollOpt, Token};
-
-use protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
+use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE:u16 = 36;
 
 //250ms timeout
-const POLL_TIMEOUT = Duration::new(0, 250_000_000);
-const UPDATE_INTERVAL = Duration::new(1, 0);
+const POLL_TIMEOUT:Duration = Duration::new(0, 250_000_000);
+const UPDATE_INTERVAL:Duration = Duration::new(1, 0);
 
 pub struct UdpTestDefinition {
     //a UUID used to identify packets associated with this test
@@ -28,56 +21,64 @@ pub struct UdpTestDefinition {
     //the length of the buffer to exchange
     pub length: u16,
 }
-pub fn build_udp_test_definition(details:&serde_json::Value) -> BoxResult<udp::UdpTestDefinition> {
-    let mut test_id_bytes = [u8; 16];
+pub fn build_udp_test_definition(details:&serde_json::Value) -> super::BoxResult<UdpTestDefinition> {
+    let mut test_id_bytes:[u8; 16] = [0; 16];
     for (i, v) in details.get("testId")?.as_array()?.iter().enumerate() {
         test_id_bytes[i] = v.as_i64()? as u8;
     }
     
-    udp::UdpTestDefinition{
+    UdpTestDefinition{
         test_id: test_id_bytes,
         bandwidth: details.get("bandwidth")?.as_f64()? as u64,
         length: details.get("length")?.as_i64()? as u16,
     }
 }
 
-mod receiver {
+pub mod receiver {
+    use std::fmt::{format};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    
+    use chrono::{NaiveDateTime};
+    
+    use mio::net::UdpSocket;
+    use mio::{Events, Ready, Poll, PollOpt, Token};
+    
     struct UdpReceiverHistory {
-        mut packets_received: u64,
+        packets_received: u64,
         
-        mut next_packet_id: u64,
+        next_packet_id: u64,
         
-        mut lost_packets: i64,
-        mut out_of_order_packets: u64,
-        mut duplicate_packets: u64,
+        lost_packets: i64,
+        out_of_order_packets: u64,
+        duplicate_packets: u64,
         
-        mut unbroken_sequence: u64,
-        mut jitter_seconds: Option<f32>,
-        mut previous_time_delta_nanoseconds: i64,
+        unbroken_sequence: u64,
+        jitter_seconds: Option<f32>,
+        previous_time_delta_nanoseconds: i64,
     }
     
     pub struct UdpReceiver {
         active: bool,
-        test_definition: UdpTestDefinition,
-        mut history: UdpReceiverHistory,
+        test_definition: super::UdpTestDefinition,
+        history: UdpReceiverHistory,
         
-        mut socket: UdpSocket,
+        socket: UdpSocket,
         mio_poll_token: Token,
-        mut mio_poll: Poll,
+        mio_poll: Poll,
         
         //the fixed number of bytes that frame each packet
         framing_size: u64,
     }
-    pub impl UdpReceiver {
-        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16) -> BoxResult<UdpReceiver> {
+    impl UdpReceiver {
+        fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u64;
             if *ip_version == 4 {
                 framing_size = 28;
-                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port)));
+                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port));
             } else if *ip_version == 6 {
                 framing_size = 48;
-                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port)));
+                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port));
             } else {
                 return Err(format!("unsupported IP version: {}", ip_version));
             }
@@ -153,13 +154,13 @@ mod receiver {
             
             let time_delta_nanoseconds = time_delta.num_nanoseconds();
             if time_delta_nanoseconds.is_none() {
-                warn!("sender and receiver clocks are too out-of-sync to calculate jitter");
+                log::warn!("sender and receiver clocks are too out-of-sync to calculate jitter");
                 return
             }
             let unwrapped_time_delta_nanoseconds = time_delta_nanoseconds.unwrap();
             
             if self.history.unbroken_sequence > 1 { //do jitter calculation
-                let delta_seconds = (((unwrapped_time_delta_nanoseconds - self.history.previous_time_delta_nanoseconds).abs() / 1_000_000_000) as f32);
+                let delta_seconds = ((unwrapped_time_delta_nanoseconds - self.history.previous_time_delta_nanoseconds).abs() / 1_000_000_000) as f32;
                 
                 if self.history.unbroken_sequence > 2 { //normal jitter-calculation, per the RFC
                     let mut jitter_seconds = self.history.jitter_seconds.unwrap();
@@ -197,38 +198,39 @@ mod receiver {
             } else {
                 self.history.unbroken_sequence = 0;
                 self.history.jitter_seconds = None;
-                debug!("packets rcv:{} lst:{} ooo:{} dup:{}", self.history.packets_received, self.history.lost_packets, self.history.out_of_order_packets, self.history.duplicate_packets);
+                log::debug!("packets rcv:{} lst:{} ooo:{} dup:{}", self.history.packets_received, self.history.lost_packets, self.history.out_of_order_packets, self.history.duplicate_packets);
             }
             return true;
         }
     }
-    impl super::TestStream for UdpReceiver {
-        fn run_interval(&self) -> Option<BoxResult<IntervalResult>> {
+    impl crate::stream::TestStream for UdpReceiver {
+        fn run_interval(&self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
             let mut events = Events::with_capacity(1); //only watching one socket
-            let mut buf = [u8; self.test_definition.length];
+            let mut buf = vec![0_u8; self.test_definition.length];
             
-            let mut bytes_received:u64 = 0
+            let mut bytes_received:u64 = 0;
             let initial_packets_received = self.history.packets_received;
             let initial_lost_packets = self.history.lost_packets;
             let initial_out_of_order_packets = self.history.out_of_order_packets;
             let initial_duplicate_packets = self.history.duplicate_packets;
             
+            let mio_poll_token = self.mio_poll_token;
             let start = Instant::now();
             
             while self.active {
-                self.poll.poll(&mut events, Some(POLL_TIMEOUT))?;
+                self.poll.poll(&mut events, Some(super::POLL_TIMEOUT))?;
                 for event in events.iter() {
                     match event.token() {
-                        self.mio_poll_token => loop {
+                        mio_poll_token => loop {
                             match self.socket.recv(&mut buf) {
                                 Ok(packet_size) => {
-                                    if packet.length() == 16 { //possible end-of-test message
-                                        if packet[0..16] == self.test_definition.test_id { //test's over
+                                    if packet_size == 16 { //possible end-of-test message
+                                        if &buf[0..16] == self.test_definition.test_id { //test's over
                                             self.stop();
                                             break;
                                         }
                                     }
-                                    if packet.length() < TEST_HEADER_SIZE {
+                                    if packet_size < super::TEST_HEADER_SIZE {
                                         log::error!("received malformed packet with size {}", packet_size);
                                         continue
                                     }
@@ -237,8 +239,8 @@ mod receiver {
                                         bytes_received += packet_size + self.framing_size;
                                         
                                         let elapsed_time = start.elapsed();
-                                        if elapsed_time >= UPDATE_INTERVAL {
-                                            return Some(Ok(UdpReceiveResult{
+                                        if elapsed_time >= super::UPDATE_INTERVAL {
+                                            return Some(Ok(super::UdpReceiveResult{
                                                 duration: elapsed_time.as_secs_f64(),
                                                 
                                                 bytes_received: bytes_received,
@@ -256,7 +258,7 @@ mod receiver {
                                         continue
                                     }
                                 },
-                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => { //receive timeout
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
                                     break;
                                 },
                                 Err(e) => {
@@ -265,13 +267,13 @@ mod receiver {
                             }
                         },
                         _ => {
-                            warn!("got event for unbound token: {:?}", event);
+                            log::warn!("got event for unbound token: {:?}", event);
                         }
                     }
                 }
             }
             if bytes_received > 0 {
-                Some(Ok(UdpReceiveResult{
+                Some(Ok(super::UdpReceiveResult{
                     duration: start.elapsed().as_secs_f64(),
                     
                     bytes_received: bytes_received,
@@ -288,7 +290,7 @@ mod receiver {
             }
         }
         
-        fn get_port(&self) -> BoxResult<u16> {
+        fn get_port(&self) -> super::BoxResult<u16> {
             let sock_addr = self.socket.local_addr()?;
             Ok(sock_addr.port())
         }
@@ -301,12 +303,19 @@ mod receiver {
 
 
 
-mod sender {
+pub mod sender {
+    use std::fmt::{format};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+    
+    use mio::net::UdpSocket;
+    
+    use std::thread::{sleep};
+    
     pub struct UdpSender {
         active: bool,
-        test_definition: UdpTestDefinition,
+        test_definition: super::UdpTestDefinition,
         
-        mut socket: UdpSocket,
+        socket: UdpSocket,
         
         //the interval, in seconds, at which to send data
         send_interval: f32,
@@ -314,12 +323,12 @@ mod sender {
         //the fixed number of bytes that frame each packet
         framing_size: u64,
         
-        mut remaining_duration: f32,
-        mut next_packet_id: u64,
-        mut staged_packet: [u8],
+        remaining_duration: f32,
+        next_packet_id: u64,
+        staged_packet: Vec<u8>,
     }
-    pub impl UdpSender {
-        pub fn new(test_definition:UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> BoxResult<UdpSender> {
+    impl UdpSender {
+        fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
             let framing_size:u64;
             if ip_version == 4 {
@@ -333,12 +342,12 @@ mod sender {
             }
             socket.connect(format!("{}:{}", receiver_host, receiver_port))?;
             
-            let mut staged_packet = [u8; test_definition.length];
-            for i in TEST_HEADER_SIZE..(staged_packet.len()) { //fill the packet with a fixed sequence
+            let mut staged_packet = vec![0_u8; test_definition.length];
+            for i in super::TEST_HEADER_SIZE..(staged_packet.len()) { //fill the packet with a fixed sequence
                 staged_packet[i] = i %256;
             }
             //embed the test ID
-            output_buffer[0..16].copy_from_slice(test_definition.test_id);
+            staged_packet[0..16].copy_from_slice(test_definition.test_id);
             
             Ok(UdpSender{
                 active: true,
@@ -370,8 +379,8 @@ mod sender {
             self.next_packet_id += 1;
         }
     }
-    impl super::TestStream for UdpSender {
-        fn run_interval(&self) -> Option<BoxResult<IntervalResult>> {
+    impl crate::stream::TestStream for UdpSender {
+        fn run_interval(&self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let bytes_per_interval = ((self.test_definition.bandwidth as f64) * self.send_interval) as u64;
             let mut bytes_per_interval_remaining = bytes_per_interval;
@@ -387,15 +396,15 @@ mod sender {
                 self.prepare_packet();
                 match self.socket.send(self.staged_packet) {
                     Ok(packet_size) => {
-                        let bytes_written = packet_size + self.framing_size
+                        let bytes_written = packet_size + self.framing_size;
                         bytes_sent += bytes_written;
                         bytes_per_interval_remaining -= bytes_written;
                         
                         let elapsed_time = cycle_start.elapsed();
-                        if elapsed_time >= UPDATE_INTERVAL {
+                        if elapsed_time >= super::UPDATE_INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
-                            return Some(Ok(UdpSendResult{
+                            return Some(Ok(super::UdpSendResult{
                                 duration: elapsed_time.as_secs_f32(),
                                 
                                 bytes_sent: bytes_sent,
@@ -418,7 +427,7 @@ mod sender {
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
             }
             if bytes_sent > 0 {
-                Some(Ok(UdpSendResult{
+                Some(Ok(super::UdpSendResult{
                     duration: cycle_start.elapsed().as_secs_f64(),
                     
                     bytes_sent: bytes_sent,
@@ -434,7 +443,7 @@ mod sender {
             }
         }
         
-        fn get_port(&self) -> BoxResult<u16> {
+        fn get_port(&self) -> super::BoxResult<u16> {
             let sock_addr = self.socket.local_addr()?;
             Ok(sock_addr.port())
         }

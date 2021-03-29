@@ -8,7 +8,7 @@ pub trait IntervalResult {
     }
 }
 
-struct UdpReceiveResult {
+pub struct UdpReceiveResult {
     duration: f32,
     
     bytes_received: u64,
@@ -26,7 +26,7 @@ impl IntervalResult for UdpReceiveResult {
     }
 }
 
-struct UdpSendResult {
+pub struct UdpSendResult {
     duration: f64,
     
     bytes_sent: u64,

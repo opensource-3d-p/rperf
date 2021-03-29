@@ -1,5 +1,6 @@
 extern crate log;
 
+use super::configuration;
 
 pub fn prepare_begin() -> serde_json::Value {
     serde_json::json!({

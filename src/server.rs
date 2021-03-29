@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::io;
 use std::net::{Shutdown};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration};
@@ -14,6 +13,10 @@ use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Ready, Poll, PollOpt, Token};
 
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
+
+use crate::protocol::messaging::{
+    prepare_connect, prepare_connected,
+};
 
 use crate::stream::tcp;
 use crate::stream::udp;
@@ -34,8 +37,8 @@ lazy_static::lazy_static!{
 fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     
-    let mut parallel_streams:Vec<crate::stream::TestStream>::new();
-    let mut parallel_streams_joinhandles:Vec::new();
+    let mut parallel_streams:Vec<dyn crate::stream::TestStream> = Vec::new();
+    let mut parallel_streams_joinhandles = Vec::new();
     
     while is_alive() {
         let payload = receive(&mut stream, is_alive)?;
@@ -44,13 +47,13 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                 match kind.as_str()? {
                     "configuration" => { //we either need to connect streams to the client or prepare to receive connections
                         if payload.get("role")?.as_str()? == "download" {
-                            log::!debug("running in forward-mode: server will be receiving data");
+                            log::debug!("running in forward-mode: server will be receiving data");
                             
                             let mut stream_ports = Vec::new();
                             if payload.get("family")?.as_str()? == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
                                 for i in 0..(payload.get("streams")?.as_i64()?) {
-                                    let test = Box::new(udp::UdpReceiver::new(test_definition.clone(), ip_version, &0)?);
+                                    let test = Box::new(udp::receiver::UdpReceiver::new(test_definition.clone(), ip_version, &0)?);
                                     parallel_streams.push(test);
                                     stream_ports.push(test.get_port()?);
                                 }
@@ -59,14 +62,13 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                             }
                             send(&mut stream, &prepare_connect(stream_ports))?;
                         } else { //upload
-                            log::!debug("running in reverse-mode: server will be uploading data");
+                            log::debug!("running in reverse-mode: server will be uploading data");
                             
                             if payload.get("family")?.as_str()? == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
                                 for port in payload.get("streamPorts")?.as_array()? {
-                                    let test = Box::new(udp::UdpSender::new(test_definition, ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64()? as u16), payload["duration"].as_f64() as f32, payload["sendInterval"].as_f64() as f32)?);
+                                    let test = Box::new(udp::sender::UdpSender::new(test_definition, ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64()? as u16), payload["duration"].as_f64() as f32, payload["sendInterval"].as_f64() as f32)?);
                                     parallel_streams.push(test);
-                                    stream_ports.push(test.get_port()?);
                                 }
                             } else { //TCP
                                 
@@ -85,7 +87,7 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                                         None => break,
                                     }
                                 }
-                            };
+                            });
                             parallel_streams_joinhandles.push(handle);
                         }
                     },
@@ -123,7 +125,7 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
 
 pub fn serve(args:ArgMatches) -> BoxResult<()> {
     let ip_version:u8;
-    if matches.is_present("version6") {
+    if args.is_present("version6") {
         ip_version = 6;
     } else {
         ip_version = 4;
@@ -167,7 +169,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             thread::spawn(move || {
                                 match handle_client(stream, &ip_version) {
                                     Ok(_) => (),
-                                    Err(e) => log::error!("error in client-handler: {:?}"),
+                                    Err(e) => log::error!("error in client-handler: {:?}", e),
                                 }
                                 stream.shutdown(Shutdown::Both).unwrap_or_default();
                             });
