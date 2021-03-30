@@ -75,12 +75,12 @@ pub mod receiver {
         mio_poll: Poll,
         
         //the fixed number of bytes that frame each packet
-        framing_size: u64,
+        framing_size: u16,
     }
     impl UdpReceiver {
         pub fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
             let socket:UdpSocket;
-            let framing_size:u64;
+            let framing_size:u16;
             if *ip_version == 4 {
                 framing_size = 28;
                 socket = UdpSocket::bind(&format!("0.0.0.0:{}", port).parse::<std::net::SocketAddr>()?).expect(&format!("failed to bind UDP socket, port {}", port));
@@ -246,7 +246,7 @@ pub mod receiver {
                                     }
                                     
                                     if self.process_packet(&buf) {
-                                        bytes_received += packet_size as u64 + self.framing_size;
+                                        bytes_received += packet_size as u64 + self.framing_size as u64;
                                         
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::UPDATE_INTERVAL {
@@ -332,7 +332,7 @@ pub mod sender {
         send_interval: f32,
         
         //the fixed number of bytes that frame each packet
-        framing_size: u64,
+        framing_size: u16,
         
         remaining_duration: f32,
         next_packet_id: u64,
@@ -341,7 +341,7 @@ pub mod sender {
     impl UdpSender {
         pub fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
-            let framing_size:u64;
+            let framing_size:u16;
             if *ip_version == 4 {
                 framing_size = 28;
                 socket = UdpSocket::bind(&format!("0.0.0.0:{}", port).parse::<std::net::SocketAddr>()?).expect("failed to bind socket");
@@ -393,7 +393,7 @@ pub mod sender {
     impl crate::stream::TestStream for UdpSender {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
-            let bytes_per_interval = ((self.test_definition.bandwidth as f32) * self.send_interval) as u64;
+            let bytes_per_interval = ((self.test_definition.bandwidth as f32) * self.send_interval) as i64;
             let mut bytes_per_interval_remaining = bytes_per_interval;
             
             let mut packets_sent:u64 = 0;
@@ -409,9 +409,9 @@ pub mod sender {
                     Ok(packet_size) => {
                         packets_sent += 1;
                         
-                        let bytes_written = packet_size as u64 + self.framing_size;
+                        let bytes_written = packet_size + (self.framing_size as usize);
                         bytes_sent += bytes_written as u64;
-                        bytes_per_interval_remaining -= bytes_written as u64;
+                        bytes_per_interval_remaining -= bytes_written as i64;
                         
                         let elapsed_time = cycle_start.elapsed();
                         if elapsed_time >= super::UPDATE_INTERVAL {
@@ -433,9 +433,9 @@ log::error!("sent {} bytes", bytes_sent);
                 
                 if bytes_per_interval_remaining <= 0 {
                     bytes_per_interval_remaining = bytes_per_interval;
-                    let sleep_duration = interval_duration - cycle_start.elapsed();
-                    if sleep_duration.as_nanos() > 0 {
-                        sleep(sleep_duration);
+                    let elapsed_time = cycle_start.elapsed();
+                    if interval_duration > elapsed_time {
+                        sleep(interval_duration - elapsed_time);
                     }
                 }
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();

@@ -18,17 +18,19 @@ pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> 
     let serialised_message = serde_json::to_vec(message)?;
     
     let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
-    output_buffer[..2].copy_from_slice(&(serialised_message.len()).to_be_bytes());
+    output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());
-    
+log::error!("source {:?}", output_buffer);
     Ok(stream.write_all(&output_buffer)?)
 }
 
 fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<u16> {
+    let mut cloned_stream = stream.try_clone()?;
+    
     let mio_token = Token(0);
     let poll = Poll::new()?;
     poll.register(
-        stream,
+        &cloned_stream,
         mio_token,
         Ready::readable(),
         PollOpt::edge(),
@@ -42,8 +44,9 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
         for event in events.iter() {
             match event.token() {
                 _ => loop {
-                    match stream.read(&mut length_spec[length_bytes_read..]) {
+                    match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
                         Ok(size) => {
+log::error!("length {:?}", length_spec);
                             if size == 0 {
                                 if alive_check() {
                                     return Err(Box::new(simple_error::simple_error!("connection lost")));
@@ -54,7 +57,7 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
                             
                             length_bytes_read += size;
                             if length_bytes_read == 2 {
-                                poll.deregister(stream)?;
+                                //poll.deregister(cloned_stream)?;
                                 return Ok(u16::from_be_bytes(length_spec));
                             }
                         },
@@ -72,10 +75,12 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
     Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
 fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) -> BoxResult<serde_json::Value> {
+    let mut cloned_stream = stream.try_clone()?;
+    
     let mio_token = Token(0);
     let poll = Poll::new()?;
     poll.register(
-        stream,
+        &cloned_stream,
         mio_token,
         Ready::readable(),
         PollOpt::edge(),
@@ -83,14 +88,15 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) 
     let mut events = Events::with_capacity(1); //only interacting with one stream
     
     let mut bytes_read = 0;
-    let mut buffer = Vec::with_capacity(length.into());
+    let mut buffer = vec![0_u8; length.into()];
     while alive_check() { //waiting to receive the payload
         poll.poll(&mut events, Some(POLL_TIMEOUT))?;
         for event in events.iter() {
             match event.token() {
                 _ => loop {
-                    match stream.read(&mut buffer[bytes_read..]) {
+                    match cloned_stream.read(&mut buffer[bytes_read..]) {
                         Ok(size) => {
+log::error!("buffer {:?}", buffer);
                             if size == 0 {
                                 if alive_check() {
                                     return Err(Box::new(simple_error::simple_error!("connection lost")));
@@ -103,7 +109,7 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) 
                             if bytes_read == length as usize {
                                 match serde_json::from_slice(&buffer) {
                                     Ok(v) => {
-                                        poll.deregister(stream)?;
+                                        //poll.deregister(cloned_stream)?;
                                         return Ok(v);
                                     },
                                     Err(e) => {
