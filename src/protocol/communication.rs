@@ -54,7 +54,7 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
                             
                             length_bytes_read += size;
                             if length_bytes_read == 2 {
-                                poll.deregister(stream);
+                                poll.deregister(stream)?;
                                 return Ok(u16::from_be_bytes(length_spec));
                             }
                         },
@@ -103,7 +103,7 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) 
                             if bytes_read == length as usize {
                                 match serde_json::from_slice(&buffer) {
                                     Ok(v) => {
-                                        poll.deregister(stream);
+                                        poll.deregister(stream)?;
                                         return Ok(v);
                                     },
                                     Err(e) => {

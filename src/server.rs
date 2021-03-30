@@ -27,10 +27,10 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 const POLL_TIMEOUT:Duration = Duration::from_millis(500);
 
-static alive:AtomicBool = AtomicBool::new(true);
+static ALIVE:AtomicBool = AtomicBool::new(true);
 
 lazy_static::lazy_static!{
-    static ref clients:CHashMap<String, bool> = {
+    static ref CLIENTS:CHashMap<String, bool> = {
         let hm = CHashMap::new();
         hm
     };
@@ -141,7 +141,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
         }
     }
     
-    clients.remove(&peer_addr.to_string());
+    CLIENTS.remove(&peer_addr.to_string());
     Ok(())
 }
 
@@ -186,7 +186,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
                             stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
                             
-                            clients.insert(address.to_string(), false);
+                            CLIENTS.insert(address.to_string(), false);
                             
                             thread::spawn(move || {
                                 match handle_client(&mut stream, &ip_version) {
@@ -209,16 +209,16 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
     }
     
     //wait until all clients have been disconnected
-    while clients.len() > 0 {
-        log::info!("waiting for {} clients to finish...", clients.len());
+    while CLIENTS.len() > 0 {
+        log::info!("waiting for {} clients to finish...", CLIENTS.len());
         thread::sleep(POLL_TIMEOUT);
     }
     Ok(())
 }
 
 pub fn kill() -> bool {
-    alive.swap(false, Ordering::Relaxed)
+    ALIVE.swap(false, Ordering::Relaxed)
 }
 fn is_alive() -> bool {
-    alive.load(Ordering::Relaxed)
+    ALIVE.load(Ordering::Relaxed)
 }

@@ -21,7 +21,7 @@ use crate::stream::udp;
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
-static alive:AtomicBool = AtomicBool::new(true);
+static ALIVE:AtomicBool = AtomicBool::new(true);
 
 fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
@@ -235,10 +235,10 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
 }
 
 pub fn kill() -> bool {
-    alive.swap(false, Ordering::Relaxed)
+    ALIVE.swap(false, Ordering::Relaxed)
 }
 fn is_alive() -> bool {
-    alive.load(Ordering::Relaxed)
+    ALIVE.load(Ordering::Relaxed)
 }
 
 

@@ -446,7 +446,10 @@ pub mod sender {
             } else {
                 //indicate that the test is over by sending the test ID by itself
                 for _ in 0..4 { //do it a few times in case of loss
-                    self.socket.send(&self.staged_packet[0..16]);
+                    let send_result = self.socket.send(&self.staged_packet[0..16]);
+                    if send_result.is_err() {
+                        return Some(Err(Box::new(send_result.unwrap_err())));
+                    }
                 }
                 
                 None
