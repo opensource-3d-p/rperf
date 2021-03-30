@@ -37,6 +37,7 @@ lazy_static::lazy_static!{
 
 fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
+    let mut started = false;
     
     let mut parallel_streams:Vec<&dyn TestStream> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
@@ -83,18 +84,24 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                         }
                     },
                     "begin" => {
-                        for parallel_stream in &parallel_streams {
-                            let handle = thread::spawn(|| {
-                                loop {
-                                    match parallel_stream.run_interval() {
-                                        Some(interval_result) => {
-                                            //write the result into an std::sync::mpsc instance, which another thread will harvest and forward to the client
-                                        },
-                                        None => break,
+                        if !started {
+                            for parallel_stream in &parallel_streams {
+                                let handle = thread::spawn(|| {
+                                    loop {
+                                        match parallel_stream.run_interval() {
+                                            Some(interval_result) => {
+                                                //write the result into an std::sync::mpsc instance, which another thread will harvest and forward to the client
+                                            },
+                                            None => break,
+                                        }
                                     }
-                                }
-                            });
-                            parallel_streams_joinhandles.push(handle);
+                                });
+                                parallel_streams_joinhandles.push(handle);
+                            }
+                            started = true;
+                        } else {
+                            log::error!("duplicate begin-signal from {}", stream.peer_addr()?);
+                            break;
                         }
                     },
                     "end" => {
