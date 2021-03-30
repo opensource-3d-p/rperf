@@ -110,92 +110,102 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     //TODO: prepare the display/result-processing thread
     
-    while is_alive() {
-        let payload = receive(&mut stream, is_alive)?;
+    let connection_payload = receive(&mut stream, is_alive)?;
+    match connection_payload.get("kind") {
+        Some(kind) => {
+            match kind.as_str().unwrap_or_default() {
+                "connect" => { //we need to connect to the server
+                    if args.is_present("udp") {
+                        let test_definition = udp::build_udp_test_definition(&upload_config)?;
+                        for port in connection_payload.get("streamPorts").unwrap().as_array().unwrap() {
+                            let test = udp::sender::UdpSender::new(
+                                test_definition,
+                                &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
+                                &(upload_config["duration"].as_f64().unwrap() as f32),
+                                &(upload_config["sendInterval"].as_f64().unwrap() as f32),
+                            )?;
+                            parallel_streams.push(&test);
+                        }
+                    } else { //TCP
+                        
+                    }
+                },
+                "connected" => { //server has connected to us
+                    //nothing more to do in this flow
+                },
+                _ => {
+                    log::error!("invalid data from {}", stream.peer_addr()?);
+                    kill();
+                },
+            }
+        },
+        None => {
+            log::error!("invalid data from {}", stream.peer_addr()?);
+            kill();
+        },
+    }
+    
+    if is_alive() {
+        //tell the server to start
+        send(&mut stream, &prepare_begin())?;
         
-        match payload.get("kind") {
-            Some(kind) => {
-                match kind.as_str().unwrap_or_default() {
-                    "connect" => { //we need to connect to the server
-                        if args.is_present("udp") {
-                            let test_definition = udp::build_udp_test_definition(&upload_config)?;
-                            for port in payload.get("streamPorts").unwrap().as_array().unwrap() {
-                                let test = udp::sender::UdpSender::new(
-                                    test_definition,
-                                    &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
-                                    &(upload_config["duration"].as_f64().unwrap() as f32),
-                                    &(upload_config["sendInterval"].as_f64().unwrap() as f32),
-                                )?;
-                                parallel_streams.push(&test);
-                            }
-                        } else { //TCP
-                            
-                        }
-                        send(&mut stream, &prepare_begin())?;
-                        
-                        for parallel_stream in &parallel_streams {
-                            let handle = thread::spawn(|| {
-                                loop {
-                                    match parallel_stream.run_interval() {
-                                        Some(interval_result) => {
-                                            //write the result into an std::sync::mpsc instance, which another thread will harvest and sort as needed
-                                        },
-                                        None => break
-                                    }
-                                }
-                            });
-                            parallel_streams_joinhandles.push(handle);
-                        }
-                    },
-                    "connected" => { //server has connected to us
-                        send(&mut stream, &prepare_begin())?;
-                        
-                        for parallel_stream in &parallel_streams {
-                            let handle = thread::spawn(|| {
-                                loop {
-                                    match parallel_stream.run_interval() {
-                                        Some(interval_result) => {
-                                            //write the result into an std::sync::mpsc instance, which another thread will harvest and sort as needed
-                                        },
-                                        None => {
-                                            //set the "done" flag
-                                            break;
-                                        },
-                                    }
-                                }
-                            });
-                            parallel_streams_joinhandles.push(handle);
-                        }
-                    },
-                    _ => {
-                        log::error!("invalid data from {}", stream.peer_addr()?);
-                        break;
-                    },
+        //begin the test-streams
+        for parallel_stream in &parallel_streams {
+            let handle = thread::spawn(|| {
+                loop {
+                    match parallel_stream.run_interval() {
+                        Some(interval_result) => {
+                            //write the result into an std::sync::mpsc instance, which another thread will harvest and sort as needed
+                        },
+                        None => break
+                    }
                 }
-            },
-            None => {
-                log::error!("invalid data from {}", stream.peer_addr()?);
-                break;
-            },
+            });
+            parallel_streams_joinhandles.push(handle);
         }
         
-        //after that response is received, send a message to begin; once that message has been sent, tell all of the threads to begin iterating,
-        //with a callback function to update the execution data (this is passed back through a queue to prevent them from blocking)
-        //if output is non-JSON, this thread is responsible for not just updating the structures, but also formatting and presentation
-        
-        //std::sync::mpsc
-        
-        //every subsequent message from the server will be one of its iteration results; when received, treat them the same way as the local
-        //iteration results
-        
-        //if the server is uploading, each of its iterators will be capped with a "done" signal, which sets a flag in the local iteration results
-        //if we're uploading, send a "done" to the server under the same conditions, which it will match with its own "done", which we use to update our local state
-        //for UDP, this is a packet containing only the test ID, 16 bytes in length
-        //for TCP, it's just closing the stream
-        
-        //when all streams have finished, send an "end" message to the server
-        //then break, since everything is synced
+        //watch for events from the server
+        while is_alive() {
+            let payload = receive(&mut stream, is_alive)?;
+            
+            match payload.get("kind") {
+                Some(kind) => {
+                    match kind.as_str().unwrap_or_default() {
+                        "result" => { //result from a test
+                            //...
+                        },
+                        _ => {
+                            log::error!("invalid data from {}", stream.peer_addr()?);
+                            break;
+                        },
+                    }
+                },
+                None => {
+                    log::error!("invalid data from {}", stream.peer_addr()?);
+                    break;
+                },
+            }
+            
+            
+            //after that response is received, send a message to begin; once that message has been sent, tell all of the threads to begin iterating,
+            //with a callback function to update the execution data (this is passed back through a queue to prevent them from blocking)
+            //if output is non-JSON, this thread is responsible for not just updating the structures, but also formatting and presentation
+            
+            //std::sync::mpsc
+            
+            //every subsequent message from the server will be one of its iteration results; when received, treat them the same way as the local
+            //iteration results
+            
+            //if the server is uploading, each of its iterators will be capped with a "done" signal, which sets a flag in the local iteration results
+            //if we're uploading, send a "done" to the server under the same conditions, which it will match with its own "done", which we use to update our local state
+            //for UDP, this is a packet containing only the test ID, 16 bytes in length
+            //for TCP, it's just closing the stream
+            
+            //when all streams have finished, send an "end" message to the server
+            //then break, since everything is synced
+        }
     }
+    
     stream.shutdown(Shutdown::Both).unwrap_or_default();
     
     //ensure everything has ended

@@ -1,7 +1,6 @@
 extern crate log;
 
 use std::error::Error;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration};
 
 use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
@@ -47,6 +46,7 @@ pub fn build_udp_test_definition(details:&serde_json::Value) -> super::BoxResult
 pub mod receiver {
     use std::convert::TryInto;
     use std::fmt::{format};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     
     use chrono::{NaiveDateTime};
@@ -319,6 +319,7 @@ pub mod receiver {
 
 pub mod sender {
     use std::fmt::{format};
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use mio::net::UdpSocket;
