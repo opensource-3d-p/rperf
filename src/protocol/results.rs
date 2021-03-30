@@ -9,16 +9,16 @@ pub trait IntervalResult {
 }
 
 pub struct UdpReceiveResult {
-    duration: f32,
+    pub duration: f32,
     
-    bytes_received: u64,
-    packets_received: u64,
-    lost_packets: i64,
-    out_of_order_packets: u64,
-    duplicate_packets: u64,
+    pub bytes_received: u64,
+    pub packets_received: u64,
+    pub lost_packets: i64,
+    pub out_of_order_packets: u64,
+    pub duplicate_packets: u64,
     
-    unbroken_sequence: u64,
-    jitter_seconds: Option<f32>,
+    pub unbroken_sequence: u64,
+    pub jitter_seconds: Option<f32>,
 }
 impl IntervalResult for UdpReceiveResult {
     fn to_json(&self) -> serde_json::Value {
@@ -27,10 +27,10 @@ impl IntervalResult for UdpReceiveResult {
 }
 
 pub struct UdpSendResult {
-    duration: f32,
+    pub duration: f32,
     
-    bytes_sent: u64,
-    packets_sent: u64,
+    pub bytes_sent: u64,
+    pub packets_sent: u64,
 }
 impl IntervalResult for UdpSendResult {
     fn to_json(&self) -> serde_json::Value {
@@ -39,12 +39,12 @@ impl IntervalResult for UdpSendResult {
 }
 
 struct UdpStreamResult {
-    receive_result: UdpReceiveResult,
-    send_result: UdpSendResult,
+    pub receive_result: UdpReceiveResult,
+    pub send_result: UdpSendResult,
 }
 
 struct UdpTestResult {
-    stream_results: Vec<UdpStreamResult>,
+    pub stream_results: Vec<UdpStreamResult>,
 }
 
 
