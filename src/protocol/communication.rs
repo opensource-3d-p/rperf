@@ -21,7 +21,6 @@ pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> 
     let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
     output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());
-log::error!("source {:?}", output_buffer);
     Ok(stream.write_all(&output_buffer)?)
 }
 
@@ -48,7 +47,6 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool, results_handl
                 _ => loop {
                     match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
                         Ok(size) => {
-log::error!("length {:?}", length_spec);
                             if size == 0 {
                                 if alive_check() {
                                     return Err(Box::new(simple_error::simple_error!("connection lost")));
@@ -99,7 +97,6 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, results_hand
                 _ => loop {
                     match cloned_stream.read(&mut buffer[bytes_read..]) {
                         Ok(size) => {
-log::error!("buffer {:?}", buffer);
                             if size == 0 {
                                 if alive_check() {
                                     return Err(Box::new(simple_error::simple_error!("connection lost")));

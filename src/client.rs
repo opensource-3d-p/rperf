@@ -121,18 +121,28 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>) = channel();
     
+    let mut end_notifying_stream = stream.try_clone()?;
     let mut results_handler = || -> BoxResult<()> {
         loop {
             match results_rx.try_recv() {
                 Ok(result) => {
-log::error!("{}", serde_json::to_string(&result.to_json())?);
-                    {
-                        let mut tr = test_results.lock().unwrap();
-                        tr.update_from_json(result.to_json())?;
-                    }
-                    
                     if !display_json {
                         println!("{}", result.to_string(display_bit));
+                    }
+                    
+                    let mut tr = test_results.lock().unwrap();
+                    if result.kind() == crate::protocol::results::IntervalResultKind::Done {
+                        log::info!("stream {} is done", result.get_stream_idx());
+                        
+                        tr.mark_stream_done(&result.get_stream_idx());
+                        if tr.count_in_progress_streams() == 0 {
+                            thread::sleep(std::time::Duration::from_secs(1)); //wait one second for the server to send any remaining test-data
+                            send(&mut end_notifying_stream, &prepare_end())?;
+                            thread::sleep(std::time::Duration::from_millis(500)); //wait a moment for the shutdown to finish cleanly
+                            kill();
+                        }
+                    } else {
+                        tr.update_from_json(result.to_json())?;
                     }
                 },
                 Err(_) => break, //whether it's empty or disconnected, there's nothing to do
@@ -213,7 +223,8 @@ log::error!("{}", serde_json::to_string(&result.to_json())?);
             let c_results_tx = results_tx.clone();
             let handle = thread::spawn(move || {
                 loop {
-                    match c_ps.lock().unwrap().run_interval() {
+                    let mut test = c_ps.lock().unwrap();
+                    match test.run_interval() {
                         Some(interval_result) => match interval_result {
                             Ok(ir) => match c_results_tx.send(ir) {
                                 Ok(_) => (),
@@ -221,7 +232,10 @@ log::error!("{}", serde_json::to_string(&result.to_json())?);
                             },
                             Err(e) => log::error!("unable to process stream: {:?}", e),
                         },
-                        None => break,
+                        None => {
+                            c_results_tx.send(Box::new(crate::protocol::results::DoneResult{stream_idx: test.get_idx()}));
+                            break;
+                        },
                     }
                 }
             });
@@ -256,24 +270,6 @@ log::error!("{}", serde_json::to_string(&result.to_json())?);
                     break;
                 },
             }
-            
-            
-            //after that response is received, send a message to begin; once that message has been sent, tell all of the threads to begin iterating,
-            //with a callback function to update the execution data (this is passed back through a queue to prevent them from blocking)
-            //if output is non-JSON, this thread is responsible for not just updating the structures, but also formatting and presentation
-            
-            //std::sync::mpsc
-            
-            //every subsequent message from the server will be one of its iteration results; when received, treat them the same way as the local
-            //iteration results
-            
-            //if the server is uploading, each of its iterators will be capped with a "done" signal, which sets a flag in the local iteration results
-            //if we're uploading, send a "done" to the server under the same conditions, which it will match with its own "done", which we use to update our local state
-            //for UDP, this is a packet containing only the test ID, 16 bytes in length
-            //for TCP, it's just closing the stream
-            
-            //when all streams have finished, send an "end" message to the server
-            //then break, since everything is synced
         }
     }
     
@@ -309,57 +305,3 @@ pub fn kill() -> bool {
 fn is_alive() -> bool {
     ALIVE.load(Ordering::Relaxed)
 }
-
-
-
-
-/*
-
-
-        
-        .arg(
-            Arg::with_name("omit")
-                .help("omit a number of seconds from the start of calculations, in non-JSON modes, to avoid including TCP ramp-up in averages")
-                .takes_value(true)
-                .long("omit")
-                .short("O")
-                .default_value("0.0")
-                .required(false)
-        )
-        
-        
-        .arg(
-            Arg::with_name("window")
-                .help("window-size, in bytes, for TCP tests")
-                .takes_value(false)
-                .long("window")
-                .short("w")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("mss")
-                .help("maximum segment-size, for TCP tests (default is based on MTU)")
-                .takes_value(false)
-                .long("mss")
-                .short("M")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("nodelay")
-                .help("use no-delay mode for TCP tests, deisabling Nagle's Algorithm")
-                .takes_value(false)
-                .long("no-delay")
-                .short("N")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("congestion")
-                .help("use a specific congestion-control algorithm for traffic-shaping")
-                .takes_value(false)
-                .long("congestion")
-                .short("C")
-                .required(false)
-        )
-        
-        
-*/

@@ -53,7 +53,6 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
         loop {
             match results_rx.try_recv() {
                 Ok(result) => {
-log::error!("{}", serde_json::to_string(&result.to_json())?);
                     send(&mut forwarding_send_stream, &result.to_json())?;
                 },
                 Err(_) => break, //whether it's empty or disconnected, there's nothing to do
