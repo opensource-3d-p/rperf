@@ -141,7 +141,6 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
         }
     }
     
-    CLIENTS.remove(&peer_addr.to_string());
     Ok(())
 }
 
@@ -193,6 +192,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                                     Ok(_) => (),
                                     Err(e) => log::error!("error in client-handler: {:?}", e),
                                 }
+                                CLIENTS.remove(&address.to_string());
                                 stream.shutdown(Shutdown::Both).unwrap_or_default();
                             });
                         },

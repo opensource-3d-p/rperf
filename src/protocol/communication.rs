@@ -17,8 +17,8 @@ const POLL_TIMEOUT:Duration = Duration::from_millis(50);
 pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> {
     let serialised_message = serde_json::to_vec(message)?;
     
-    let mut output_buffer = Vec::with_capacity(serialised_message.len() + 2);
-    output_buffer[..2].copy_from_slice(&serialised_message.len().to_be_bytes());
+    let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
+    output_buffer[..2].copy_from_slice(&(serialised_message.len()).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());
     
     Ok(stream.write_all(&output_buffer)?)
@@ -45,7 +45,7 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
                     match stream.read(&mut length_spec[length_bytes_read..]) {
                         Ok(size) => {
                             if size == 0 {
-                                if !alive_check() {
+                                if alive_check() {
                                     return Err(Box::new(simple_error::simple_error!("connection lost")));
                                 } else { //shutting down; a disconnect is expected
                                     return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
@@ -92,7 +92,7 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) 
                     match stream.read(&mut buffer[bytes_read..]) {
                         Ok(size) => {
                             if size == 0 {
-                                if !alive_check() {
+                                if alive_check() {
                                     return Err(Box::new(simple_error::simple_error!("connection lost")));
                                 } else { //shutting down; a disconnect is expected
                                     return Err(Box::new(simple_error::simple_error!("local shutdown requested")));

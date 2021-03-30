@@ -250,6 +250,7 @@ pub mod receiver {
                                         
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::UPDATE_INTERVAL {
+log::error!("received {} bytes", bytes_received);
                                             return Some(Ok(Box::new(super::UdpReceiveResult{
                                                 duration: elapsed_time.as_secs_f32(),
                                                 
@@ -282,6 +283,7 @@ pub mod receiver {
                 }
             }
             if bytes_received > 0 {
+log::error!("received {} bytes", bytes_received);
                 Some(Ok(Box::new(super::UdpReceiveResult{
                     duration: start.elapsed().as_secs_f32(),
                     
@@ -295,6 +297,7 @@ pub mod receiver {
                     jitter_seconds: self.history.jitter_seconds,
                 })))
             } else {
+log::error!("ended");
                 None
             }
         }
@@ -414,6 +417,7 @@ pub mod sender {
                         if elapsed_time >= super::UPDATE_INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
+log::error!("sent {} bytes", bytes_sent);
                             return Some(Ok(Box::new(super::UdpSendResult{
                                 duration: elapsed_time.as_secs_f32(),
                                 
@@ -437,6 +441,7 @@ pub mod sender {
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
             }
             if bytes_sent > 0 {
+log::error!("sent {} bytes", bytes_sent);
                 Some(Ok(Box::new(super::UdpSendResult{
                     duration: cycle_start.elapsed().as_secs_f32(),
                     
@@ -444,6 +449,7 @@ pub mod sender {
                     packets_sent: packets_sent,
                 })))
             } else {
+log::error!("done");
                 //indicate that the test is over by sending the test ID by itself
                 for _ in 0..4 { //do it a few times in case of loss
                     let send_result = self.socket.send(&self.staged_packet[0..16]);
@@ -451,7 +457,6 @@ pub mod sender {
                         return Some(Err(Box::new(send_result.unwrap_err())));
                     }
                 }
-                
                 None
             }
         }
