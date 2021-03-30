@@ -79,7 +79,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
     stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
     
-    let mut parallel_streams:Vec<&(dyn TestStream + Sync + Send)> = Vec::new();
+    let mut parallel_streams:Vec<Box<(dyn TestStream + Sync + Send)>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     if args.is_present("reverse") {
@@ -91,8 +91,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
             let test_definition = udp::build_udp_test_definition(&download_config)?;
             for i in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
                 let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &ip_version, &0)?;
-                parallel_streams.push(&test);
                 stream_ports.push(test.get_port()?);
+                parallel_streams.push(Box::new(test));
             }
         } else { //TCP
             
@@ -124,7 +124,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
                             )?;
-                            parallel_streams.push(&test);
+                            parallel_streams.push(Box::new(test));
                         }
                     } else { //TCP
                         
@@ -151,7 +151,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         //begin the test-streams
         for parallel_stream in &parallel_streams {
-            let handle = thread::spawn(|| {
+            let handle = thread::spawn(move || {
                 loop {
                     match parallel_stream.run_interval() {
                         Some(interval_result) => {

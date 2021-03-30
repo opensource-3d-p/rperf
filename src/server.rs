@@ -35,11 +35,11 @@ lazy_static::lazy_static!{
     };
 }
 
-fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
+fn handle_client(mut stream:&TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     let mut started = false;
     
-    let mut parallel_streams:Vec<&(dyn TestStream + Sync + Send)> = Vec::new();
+    let mut parallel_streams:Vec<Box<(dyn TestStream + Sync + Send)>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     while is_alive() {
@@ -56,8 +56,8 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
                                 for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
                                     let test = udp::receiver::UdpReceiver::new(test_definition.clone(), ip_version, &0)?;
-                                    parallel_streams.push(&test);
                                     stream_ports.push(test.get_port()?);
+                                    parallel_streams.push(Box::new(test));
                                 }
                             } else { //TCP
                                 
@@ -75,7 +75,7 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
                                     )?;
-                                    parallel_streams.push(&test);
+                                    parallel_streams.push(Box::new(test));
                                 }
                             } else { //TCP
                                 
@@ -86,7 +86,7 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
                     "begin" => {
                         if !started {
                             for parallel_stream in &parallel_streams {
-                                let handle = thread::spawn(|| {
+                                let handle = thread::spawn(move || {
                                     loop {
                                         match parallel_stream.run_interval() {
                                             Some(interval_result) => {
@@ -180,7 +180,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             clients.insert(address.to_string(), false);
                             
                             thread::spawn(move || {
-                                match handle_client(stream, &ip_version) {
+                                match handle_client(&stream, &ip_version) {
                                     Ok(_) => (),
                                     Err(e) => log::error!("error in client-handler: {:?}", e),
                                 }

@@ -9,9 +9,8 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE:u16 = 36;
 
-//250ms timeout
-const POLL_TIMEOUT:Duration = Duration::new(0, 250_000_000);
-const UPDATE_INTERVAL:Duration = Duration::new(1, 0);
+const POLL_TIMEOUT:Duration = Duration::from_millis(250);
+const UPDATE_INTERVAL:Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct UdpTestDefinition {
@@ -94,7 +93,7 @@ pub mod receiver {
             }
             
             let mio_poll_token = Token(0);
-            let mut mio_poll = Poll::new()?;
+            let mio_poll = Poll::new()?;
             mio_poll.register(
                 &socket,
                 mio_poll_token,
@@ -214,7 +213,7 @@ pub mod receiver {
         }
     }
     impl crate::stream::TestStream for UdpReceiver {
-        fn run_interval(&mut self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult>>> {
             let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = vec![0_u8; self.test_definition.length.into()];
             
@@ -224,7 +223,7 @@ pub mod receiver {
             let initial_out_of_order_packets = self.history.out_of_order_packets;
             let initial_duplicate_packets = self.history.duplicate_packets;
             
-            let mio_poll_token = self.mio_poll_token;
+            let _mio_poll_token = self.mio_poll_token;
             let start = Instant::now();
             
             while self.active.load(Ordering::Relaxed) {
@@ -234,7 +233,7 @@ pub mod receiver {
                 }
                 for event in events.iter() {
                     match event.token() {
-                        mio_poll_token => loop {
+                        _mio_poll_token => loop {
                             match self.socket.recv(&mut buf) {
                                 Ok(packet_size) => {
                                     if packet_size == 16 { //possible end-of-test message
@@ -253,7 +252,7 @@ pub mod receiver {
                                         
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::UPDATE_INTERVAL {
-                                            return Some(Ok(&super::UdpReceiveResult{
+                                            return Some(Ok(Box::new(super::UdpReceiveResult{
                                                 duration: elapsed_time.as_secs_f32(),
                                                 
                                                 bytes_received: bytes_received,
@@ -264,7 +263,7 @@ pub mod receiver {
                                                 
                                                 unbroken_sequence: self.history.unbroken_sequence,
                                                 jitter_seconds: self.history.jitter_seconds,
-                                            }))
+                                            })))
                                         }
                                     } else {
                                         log::error!("received packet unrelated to the current test");
@@ -286,7 +285,7 @@ pub mod receiver {
                 }
             }
             if bytes_received > 0 {
-                Some(Ok(&super::UdpReceiveResult{
+                Some(Ok(Box::new(super::UdpReceiveResult{
                     duration: start.elapsed().as_secs_f32(),
                     
                     bytes_received: bytes_received,
@@ -297,7 +296,7 @@ pub mod receiver {
                     
                     unbroken_sequence: self.history.unbroken_sequence,
                     jitter_seconds: self.history.jitter_seconds,
-                }))
+                })))
             } else {
                 None
             }
@@ -393,7 +392,7 @@ pub mod sender {
         }
     }
     impl crate::stream::TestStream for UdpSender {
-        fn run_interval(&mut self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let bytes_per_interval = ((self.test_definition.bandwidth as f32) * self.send_interval) as u64;
             let mut bytes_per_interval_remaining = bytes_per_interval;
@@ -409,6 +408,8 @@ pub mod sender {
                 self.prepare_packet();
                 match self.socket.send(&self.staged_packet) {
                     Ok(packet_size) => {
+                        packets_sent += 1;
+                        
                         let bytes_written = packet_size as u64 + self.framing_size;
                         bytes_sent += bytes_written as u64;
                         bytes_per_interval_remaining -= bytes_written as u64;
@@ -417,12 +418,12 @@ pub mod sender {
                         if elapsed_time >= super::UPDATE_INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
-                            return Some(Ok(&super::UdpSendResult{
+                            return Some(Ok(Box::new(super::UdpSendResult{
                                 duration: elapsed_time.as_secs_f32(),
                                 
                                 bytes_sent: bytes_sent,
                                 packets_sent: packets_sent,
-                            }))
+                            })))
                         }
                     },
                     Err(e) => {
@@ -440,12 +441,12 @@ pub mod sender {
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
             }
             if bytes_sent > 0 {
-                Some(Ok(&super::UdpSendResult{
+                Some(Ok(Box::new(super::UdpSendResult{
                     duration: cycle_start.elapsed().as_secs_f32(),
                     
                     bytes_sent: bytes_sent,
                     packets_sent: packets_sent,
-                }))
+                })))
             } else {
                 //indicate that the test is over by sending the test ID by itself
                 for i in 0..4 { //do it a few times in case of loss
