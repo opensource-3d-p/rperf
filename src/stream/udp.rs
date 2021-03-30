@@ -208,7 +208,6 @@ pub mod receiver {
             } else {
                 self.history.unbroken_sequence = 0;
                 self.history.jitter_seconds = None;
-                log::debug!("packets rcv:{} lst:{} ooo:{} dup:{}", self.history.packets_received, self.history.lost_packets, self.history.out_of_order_packets, self.history.duplicate_packets);
             }
             return true;
         }
