@@ -12,16 +12,14 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 pub trait IntervalResult {
     fn to_json(&self) -> serde_json::Value;
     
-    fn to_json_string(&self) -> String {
-        serde_json::to_string(&self.to_json()).unwrap()
-    }
-    
     //produces test-results in tabular form
     fn to_string(&self, bit:bool) -> String;
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct UdpReceiveResult {
+    pub stream_idx: u8,
+    
     pub duration: f32,
     
     pub bytes_received: u64,
@@ -59,7 +57,7 @@ impl IntervalResult for UdpReceiveResult {
         };
         
         let mut output = format!("----------\n\
-                 UDP receive result over {:.2}s\n\
+                 UDP send result over {:.2}s\n\
                  bytes: {} | per second: {:.3} | {}\n\
                  packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
                  self.duration,
@@ -75,6 +73,8 @@ impl IntervalResult for UdpReceiveResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct UdpSendResult {
+    pub stream_idx: u8,
+    
     pub duration: f32,
     
     pub bytes_sent: u64,
@@ -117,6 +117,30 @@ impl IntervalResult for UdpSendResult {
 }
 
 
+pub fn interval_result_from_json(value:serde_json::Value) -> BoxResult<Box<dyn IntervalResult>> {
+    match value.get("family") {
+        Some(f) => match f.as_str() {
+            Some(family) => match family {
+                "udp" => match value.get("kind") {
+                    Some(k) => match k.as_str() {
+                        Some(kind) => match kind {
+                            "receive" => Ok(Box::new(udp_receive_result_from_json(value)?)),
+                            "send" => Ok(Box::new(udp_send_result_from_json(value)?)),
+                            _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind: {}", kind))),
+                        },
+                        None => Err(Box::new(simple_error::simple_error!("interval-result's kind is not a string"))),
+                    },
+                    None => Err(Box::new(simple_error::simple_error!("interval-result has no kind"))),
+                },
+                _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result family: {}", family))),
+            },
+            None => Err(Box::new(simple_error::simple_error!("interval-result's family is not a string"))),
+        },
+        None => Err(Box::new(simple_error::simple_error!("interval-result has no family"))),
+    }
+}
+
+
 pub trait StreamResults {
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()>;
 }
@@ -145,11 +169,6 @@ impl StreamResults for UdpStreamResults {
 pub trait TestResults {
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()>;
     
-    fn update_from_json_string(&mut self, s:&str) -> BoxResult<()> {
-        let value = serde_json::from_str(s)?;
-        self.update_from_json(value)
-    }
-    
     fn to_json(&self) -> serde_json::Value;
     
     //produces a pretty-printed JSON string with the test results
@@ -161,8 +180,21 @@ pub trait TestResults {
     fn to_string(&self, bit:bool) -> String;
 }
 
-struct UdpTestResults {
+pub struct UdpTestResults {
     stream_results: HashMap<u8, UdpStreamResults>,
+}
+impl UdpTestResults {
+    pub fn new() -> UdpTestResults {
+        UdpTestResults{
+            stream_results: HashMap::new(),
+        }
+    }
+    pub fn prepare_index(&mut self, idx:&u8) {
+        self.stream_results.insert(*idx, UdpStreamResults{
+            receive_results: Vec::new(),
+            send_results: Vec::new(),
+        });
+    }
 }
 impl TestResults for UdpTestResults {
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()> {

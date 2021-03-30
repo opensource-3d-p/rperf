@@ -3,6 +3,7 @@ use std::io;
 use std::net::{Shutdown};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::channel;
 use std::thread;
 use std::time::{Duration};
 
@@ -36,6 +37,7 @@ lazy_static::lazy_static!{
     };
 }
 
+
 fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     let mut started = false;
@@ -43,8 +45,26 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
+    
+    let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>) = channel();
+    
+    let mut forwarding_send_stream = stream.try_clone()?;
+    let mut results_handler = || -> BoxResult<()> {
+        loop {
+            match results_rx.try_recv() {
+                Ok(result) => {
+log::error!("{}", serde_json::to_string(&result.to_json())?);
+                    send(&mut forwarding_send_stream, &result.to_json())?;
+                },
+                Err(_) => break, //whether it's empty or disconnected, there's nothing to do
+            }
+        }
+        Ok(())
+    };
+    
+    
     while is_alive() {
-        let payload = receive(stream, is_alive)?;
+        let payload = receive(stream, is_alive, &mut results_handler)?;
         match payload.get("kind") {
             Some(kind) => {
                 match kind.as_str().unwrap() {
@@ -55,8 +75,8 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
                             let mut stream_ports = Vec::new();
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
-                                for _ in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
-                                    let test = udp::receiver::UdpReceiver::new(test_definition.clone(), ip_version, &0)?;
+                                for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
+                                    let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &(i as u8), ip_version, &0)?;
                                     stream_ports.push(test.get_port()?);
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
@@ -69,9 +89,9 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
                             
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
-                                for port in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap() {
+                                for (i, port) in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
                                     let test = udp::sender::UdpSender::new(
-                                        test_definition.clone(),
+                                        test_definition.clone(), &(i as u8),
                                         ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
@@ -88,11 +108,16 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
                         if !started {
                             for parallel_stream in parallel_streams.iter_mut() {
                                 let c_ps = Arc::clone(&parallel_stream);
+                                let c_results_tx = results_tx.clone();
                                 let handle = thread::spawn(move || {
                                     loop {
                                         match c_ps.lock().unwrap().run_interval() {
-                                            Some(interval_result) => {
-                                                //write the result into an std::sync::mpsc instance, which another thread will harvest and forward to the client
+                                            Some(interval_result) => match interval_result {
+                                                Ok(ir) => match c_results_tx.send(ir) {
+                                                    Ok(_) => (),
+                                                    Err(e) => log::error!("unable to process interval-result: {:?}", e),
+                                                },
+                                                Err(e) => log::error!("unable to process stream: {:?}", e),
                                             },
                                             None => break,
                                         }

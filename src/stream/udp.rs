@@ -68,6 +68,7 @@ pub mod receiver {
     pub struct UdpReceiver {
         active: bool,
         test_definition: super::UdpTestDefinition,
+        stream_idx: u8,
         history: UdpReceiverHistory,
         
         socket: UdpSocket,
@@ -78,7 +79,7 @@ pub mod receiver {
         framing_size: u16,
     }
     impl UdpReceiver {
-        pub fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -103,6 +104,7 @@ pub mod receiver {
             Ok(UdpReceiver{
                 active: true,
                 test_definition: test_definition,
+                stream_idx: stream_idx.to_owned(),
                 history: UdpReceiverHistory{
                     packets_received: 0,
                     
@@ -212,7 +214,7 @@ pub mod receiver {
         }
     }
     impl crate::stream::TestStream for UdpReceiver {
-        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult>>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = vec![0_u8; self.test_definition.length.into()];
             
@@ -252,6 +254,8 @@ pub mod receiver {
                                         if elapsed_time >= super::UPDATE_INTERVAL {
 log::error!("received {} bytes", bytes_received);
                                             return Some(Ok(Box::new(super::UdpReceiveResult{
+                                                stream_idx: self.stream_idx,
+                                                
                                                 duration: elapsed_time.as_secs_f32(),
                                                 
                                                 bytes_received: bytes_received,
@@ -285,6 +289,8 @@ log::error!("received {} bytes", bytes_received);
             if bytes_received > 0 {
 log::error!("received {} bytes", bytes_received);
                 Some(Ok(Box::new(super::UdpReceiveResult{
+                    stream_idx: self.stream_idx,
+                    
                     duration: start.elapsed().as_secs_f32(),
                     
                     bytes_received: bytes_received,
@@ -325,6 +331,7 @@ pub mod sender {
     pub struct UdpSender {
         active: bool,
         test_definition: super::UdpTestDefinition,
+        stream_idx: u8,
         
         socket: UdpSocket,
         
@@ -339,7 +346,7 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        pub fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -363,6 +370,7 @@ pub mod sender {
             Ok(UdpSender{
                 active: true,
                 test_definition: test_definition,
+                stream_idx: stream_idx.to_owned(),
                 
                 socket: socket,
                 
@@ -391,7 +399,7 @@ pub mod sender {
         }
     }
     impl crate::stream::TestStream for UdpSender {
-        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult>>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let bytes_per_interval = ((self.test_definition.bandwidth as f32) * self.send_interval) as i64;
             let mut bytes_per_interval_remaining = bytes_per_interval;
@@ -419,6 +427,8 @@ pub mod sender {
                             
 log::error!("sent {} bytes", bytes_sent);
                             return Some(Ok(Box::new(super::UdpSendResult{
+                                stream_idx: self.stream_idx,
+                                
                                 duration: elapsed_time.as_secs_f32(),
                                 
                                 bytes_sent: bytes_sent,
@@ -443,6 +453,8 @@ log::error!("sent {} bytes", bytes_sent);
             if bytes_sent > 0 {
 log::error!("sent {} bytes", bytes_sent);
                 Some(Ok(Box::new(super::UdpSendResult{
+                    stream_idx: self.stream_idx,
+                    
                     duration: cycle_start.elapsed().as_secs_f32(),
                     
                     bytes_sent: bytes_sent,

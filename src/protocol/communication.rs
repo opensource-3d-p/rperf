@@ -14,6 +14,7 @@ pub const KEEPALIVE_DURATION:Duration = Duration::from_secs(2); //communication 
 
 const POLL_TIMEOUT:Duration = Duration::from_millis(50);
 
+
 pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> {
     let serialised_message = serde_json::to_vec(message)?;
     
@@ -24,7 +25,7 @@ log::error!("source {:?}", output_buffer);
     Ok(stream.write_all(&output_buffer)?)
 }
 
-fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<u16> {
+fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool, results_handler:&mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
     let mut cloned_stream = stream.try_clone()?;
     
     let mio_token = Token(0);
@@ -40,6 +41,7 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<
     let mut length_bytes_read = 0;
     let mut length_spec:[u8; 2] = [0; 2];
     while alive_check() { //waiting to find out how long the next message is
+        results_handler()?; //send any outstanding results between cycles
         poll.poll(&mut events, Some(POLL_TIMEOUT))?;
         for event in events.iter() {
             match event.token() {
@@ -74,7 +76,7 @@ log::error!("length {:?}", length_spec);
     }
     Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
-fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) -> BoxResult<serde_json::Value> {
+fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, results_handler:&mut dyn FnMut() -> BoxResult<()>, length:u16) -> BoxResult<serde_json::Value> {
     let mut cloned_stream = stream.try_clone()?;
     
     let mio_token = Token(0);
@@ -90,6 +92,7 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, length:u16) 
     let mut bytes_read = 0;
     let mut buffer = vec![0_u8; length.into()];
     while alive_check() { //waiting to receive the payload
+        results_handler()?; //send any outstanding results between cycles
         poll.poll(&mut events, Some(POLL_TIMEOUT))?;
         for event in events.iter() {
             match event.token() {
@@ -131,7 +134,7 @@ log::error!("buffer {:?}", buffer);
     }
     Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
-pub fn receive(mut stream:&mut TcpStream, alive_check:fn() -> bool) -> BoxResult<serde_json::Value> {
-    let length = receive_length(&mut stream, alive_check)?;
-    receive_payload(&mut stream, alive_check, length)
+pub fn receive(mut stream:&mut TcpStream, alive_check:fn() -> bool, results_handler:&mut dyn FnMut() -> BoxResult<()>) -> BoxResult<serde_json::Value> {
+    let length = receive_length(&mut stream, alive_check, results_handler)?;
+    receive_payload(&mut stream, alive_check, results_handler, length)
 }

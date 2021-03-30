@@ -2,6 +2,7 @@ use std::error::Error;
 use std::net::{Shutdown};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::sync::mpsc::channel;
 use std::thread;
 
 use clap::ArgMatches;
@@ -54,6 +55,28 @@ fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<ser
             
 
 pub fn execute(args:ArgMatches) -> BoxResult<()> {
+    let display_json:bool;
+    let display_bit:bool;
+    match args.value_of("format").unwrap() {
+        "json" => {
+            display_json = true;
+            display_bit = false;
+        },
+        "bit" => {
+            display_json = false;
+            display_bit = true;
+        },
+        "byte" => {
+            display_json = false;
+            display_bit = false;
+        },
+        _ => {
+            log::error!("unsupported display-mode; defaulting to JSON");
+            display_json = true;
+            display_bit = false;
+        },
+    }
+    
     let ip_version:u8;
     if args.is_present("version6") {
         ip_version = 6;
@@ -80,8 +103,44 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
     stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
     
-    let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
-    let mut parallel_streams_joinhandles = Vec::new();
+    let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
+    let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
+    let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
+    
+    let mut test_results:Mutex<Box<dyn crate::protocol::results::TestResults>>;
+    if args.is_present("udp") {
+        let mut udp_test_results = crate::protocol::results::UdpTestResults::new();
+        for i in 0..stream_count {
+            udp_test_results.prepare_index(&(i as u8));
+        }
+        test_results = Mutex::new(Box::new(udp_test_results));
+    } else { //TCP
+        //FIXME: needs to be TCP
+        test_results = Mutex::new(Box::new(crate::protocol::results::UdpTestResults::new()));
+    }
+    
+    let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>) = channel();
+    
+    let mut results_handler = || -> BoxResult<()> {
+        loop {
+            match results_rx.try_recv() {
+                Ok(result) => {
+log::error!("{}", serde_json::to_string(&result.to_json())?);
+                    {
+                        let mut tr = test_results.lock().unwrap();
+                        tr.update_from_json(result.to_json())?;
+                    }
+                    
+                    if !display_json {
+                        println!("{}", result.to_string(display_bit));
+                    }
+                },
+                Err(_) => break, //whether it's empty or disconnected, there's nothing to do
+            }
+        }
+        Ok(())
+    };
+    
     
     if args.is_present("reverse") {
         log::debug!("running in reverse-mode: server will be uploading data");
@@ -90,8 +149,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         if args.is_present("udp") {
             let test_definition = udp::build_udp_test_definition(&download_config)?;
-            for i in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
-                let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &ip_version, &0)?;
+            for i in 0..stream_count {
+                let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &(i as u8), &ip_version, &0)?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
@@ -109,9 +168,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         //NOTE: we don't prepare to send data at this point; that happens in the loop below, after the server signals that it's ready
     }
     
-    //TODO: prepare the display/result-processing thread
-    
-    let connection_payload = receive(&mut stream, is_alive)?;
+    let connection_payload = receive(&mut stream, is_alive, &mut results_handler)?;
     match connection_payload.get("kind") {
         Some(kind) => {
             match kind.as_str().unwrap_or_default() {
@@ -120,7 +177,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                         let test_definition = udp::build_udp_test_definition(&upload_config)?;
                         for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
                             let test = udp::sender::UdpSender::new(
-                                test_definition.clone(),
+                                test_definition.clone(), &(i as u8),
                                 &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
@@ -135,13 +192,13 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     //nothing more to do in this flow
                 },
                 _ => {
-                    log::error!("invalid data from {}", stream.peer_addr()?);
+                    log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
                     kill();
                 },
             }
         },
         None => {
-            log::error!("invalid data from {}", stream.peer_addr()?);
+            log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
             kill();
         },
     }
@@ -153,11 +210,16 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         //begin the test-streams
         for parallel_stream in parallel_streams.iter_mut() {
             let c_ps = Arc::clone(&parallel_stream);
+            let c_results_tx = results_tx.clone();
             let handle = thread::spawn(move || {
                 loop {
                     match c_ps.lock().unwrap().run_interval() {
-                        Some(interval_result) => {
-                            //write the result into an std::sync::mpsc instance, which another thread will harvest and sort as needed
+                        Some(interval_result) => match interval_result {
+                            Ok(ir) => match c_results_tx.send(ir) {
+                                Ok(_) => (),
+                                Err(e) => log::error!("unable to process interval-result: {:?}", e),
+                            },
+                            Err(e) => log::error!("unable to process stream: {:?}", e),
                         },
                         None => break,
                     }
@@ -168,22 +230,29 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         //watch for events from the server
         while is_alive() {
-            let payload = receive(&mut stream, is_alive)?;
+            let payload = receive(&mut stream, is_alive, &mut results_handler)?;
             
             match payload.get("kind") {
                 Some(kind) => {
                     match kind.as_str().unwrap_or_default() {
-                        "result" => { //result from a test
-                            //...
+                        "receive" | "send" => { //receive-results from the server
+                            if !display_json {
+                                let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
+                                println!("{}", result.to_string(display_bit));
+                            }
+                            {
+                                let mut tr = test_results.lock().unwrap();
+                                tr.update_from_json(payload)?;
+                            }
                         },
                         _ => {
-                            log::error!("invalid data from {}", stream.peer_addr()?);
+                            log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
                             break;
                         },
                     }
                 },
                 None => {
-                    log::error!("invalid data from {}", stream.peer_addr()?);
+                    log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
                     break;
                 },
             }
