@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::net::{Shutdown};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use clap::ArgMatches;
@@ -64,12 +65,12 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     let test_id = uuid::Uuid::new_v4();
     
-    let upload_config = prepare_upload_config(&args, test_id.as_bytes())?;
+    let mut upload_config = prepare_upload_config(&args, test_id.as_bytes())?;
     let download_config = prepare_download_config(&args, test_id.as_bytes())?;
     
     
     log::info!("connecting to server at {}:{}...", server_address, port);
-    let mut stream_result = TcpStream::connect(&format!("{}:{}", server_address, port).parse()?);
+    let stream_result = TcpStream::connect(&format!("{}:{}", server_address, port).parse()?);
     if stream_result.is_err() {
         return Err(Box::new(simple_error::simple_error!(format!("unable to connect: {:?}", stream_result.unwrap_err()).as_str())));
     }
@@ -79,7 +80,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
     stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
     
-    let mut parallel_streams:Vec<Box<(dyn TestStream + Sync + Send)>> = Vec::new();
+    let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     if args.is_present("reverse") {
@@ -89,10 +90,10 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         if args.is_present("udp") {
             let test_definition = udp::build_udp_test_definition(&download_config)?;
-            for i in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
+            for _ in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
                 let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &ip_version, &0)?;
                 stream_ports.push(test.get_port()?);
-                parallel_streams.push(Box::new(test));
+                parallel_streams.push(Arc::new(Mutex::new(test)));
             }
         } else { //TCP
             
@@ -119,12 +120,12 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                         let test_definition = udp::build_udp_test_definition(&upload_config)?;
                         for port in connection_payload.get("streamPorts").unwrap().as_array().unwrap() {
                             let test = udp::sender::UdpSender::new(
-                                test_definition,
+                                test_definition.clone(),
                                 &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
                             )?;
-                            parallel_streams.push(Box::new(test));
+                            parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
                     } else { //TCP
                         
@@ -150,14 +151,15 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         send(&mut stream, &prepare_begin())?;
         
         //begin the test-streams
-        for parallel_stream in &parallel_streams {
+        for parallel_stream in parallel_streams.iter_mut() {
+            let c_ps = Arc::clone(&parallel_stream);
             let handle = thread::spawn(move || {
                 loop {
-                    match parallel_stream.run_interval() {
+                    match c_ps.lock().unwrap().run_interval() {
                         Some(interval_result) => {
                             //write the result into an std::sync::mpsc instance, which another thread will harvest and sort as needed
                         },
-                        None => break
+                        None => break,
                     }
                 }
             });
@@ -209,10 +211,17 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.shutdown(Shutdown::Both).unwrap_or_default();
     
     //ensure everything has ended
-    for ps in &parallel_streams {
-        ps.stop();
+    for ps in parallel_streams.iter_mut() {
+        let mut stream = match (*ps).lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::error!("a stream-handler was poisoned; this indicates some sort of logic error");
+                poisoned.into_inner()
+            },
+        };
+        stream.stop();
     }
-    for jh in &parallel_streams_joinhandles {
+    for jh in parallel_streams_joinhandles {
         match jh.join() {
             Ok(_) => (),
             Err(e) => log::error!("error in parallel stream: {:?}", e),

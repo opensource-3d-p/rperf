@@ -44,7 +44,6 @@ pub fn build_udp_test_definition(details:&serde_json::Value) -> super::BoxResult
 
 pub mod receiver {
     use std::convert::TryInto;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     
     use chrono::{NaiveDateTime};
@@ -67,7 +66,7 @@ pub mod receiver {
     }
     
     pub struct UdpReceiver {
-        active: AtomicBool,
+        active: bool,
         test_definition: super::UdpTestDefinition,
         history: UdpReceiverHistory,
         
@@ -102,7 +101,7 @@ pub mod receiver {
             )?;
             
             Ok(UdpReceiver{
-                active: AtomicBool::new(true),
+                active: true,
                 test_definition: test_definition,
                 history: UdpReceiverHistory{
                     packets_received: 0,
@@ -223,17 +222,16 @@ pub mod receiver {
             let initial_out_of_order_packets = self.history.out_of_order_packets;
             let initial_duplicate_packets = self.history.duplicate_packets;
             
-            let _mio_poll_token = self.mio_poll_token;
             let start = Instant::now();
             
-            while self.active.load(Ordering::Relaxed) {
+            while self.active {
                 let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
                 if poll_result.is_err() {
                     return Some(Err(Box::new(poll_result.unwrap_err())));
                 }
                 for event in events.iter() {
-                    match event.token() {
-                        _mio_poll_token => loop {
+                    if event.token() == self.mio_poll_token {
+                        loop {
                             match self.socket.recv(&mut buf) {
                                 Ok(packet_size) => {
                                     if packet_size == 16 { //possible end-of-test message
@@ -277,10 +275,9 @@ pub mod receiver {
                                     return Some(Err(Box::new(e)));
                                 },
                             }
-                        },
-                        _ => {
-                            log::warn!("got event for unbound token: {:?}", event);
                         }
+                    } else {
+                        log::warn!("got event for unbound token: {:?}", event);
                     }
                 }
             }
@@ -308,7 +305,7 @@ pub mod receiver {
         }
         
         fn stop(&mut self) {
-            self.active.store(false, Ordering::Relaxed);
+            self.active = false;
         }
     }
 }
@@ -316,7 +313,6 @@ pub mod receiver {
 
 
 pub mod sender {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use mio::net::UdpSocket;
@@ -324,7 +320,7 @@ pub mod sender {
     use std::thread::{sleep};
     
     pub struct UdpSender {
-        active: AtomicBool,
+        active: bool,
         test_definition: super::UdpTestDefinition,
         
         socket: UdpSocket,
@@ -362,7 +358,7 @@ pub mod sender {
             staged_packet[0..16].copy_from_slice(&test_definition.test_id);
             
             Ok(UdpSender{
-                active: AtomicBool::new(true),
+                active: true,
                 test_definition: test_definition,
                 
                 socket: socket,
@@ -402,7 +398,7 @@ pub mod sender {
             
             let cycle_start = Instant::now();
             
-            while self.active.load(Ordering::Relaxed) && self.remaining_duration > 0.0 {
+            while self.active && self.remaining_duration > 0.0 {
                 let packet_start = Instant::now();
                 
                 self.prepare_packet();
@@ -449,7 +445,7 @@ pub mod sender {
                 })))
             } else {
                 //indicate that the test is over by sending the test ID by itself
-                for i in 0..4 { //do it a few times in case of loss
+                for _ in 0..4 { //do it a few times in case of loss
                     self.socket.send(&self.staged_packet[0..16]);
                 }
                 
@@ -463,7 +459,7 @@ pub mod sender {
         }
         
         fn stop(&mut self) {
-            self.active.store(false, Ordering::Relaxed);
+            self.active = false;
         }
     }
 }

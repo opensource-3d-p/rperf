@@ -2,6 +2,7 @@ use std::error::Error;
 use std::io;
 use std::net::{Shutdown};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration};
 
@@ -35,15 +36,15 @@ lazy_static::lazy_static!{
     };
 }
 
-fn handle_client(mut stream:&TcpStream, ip_version:&u8) -> BoxResult<()> {
+fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     let mut started = false;
     
-    let mut parallel_streams:Vec<Box<(dyn TestStream + Sync + Send)>> = Vec::new();
+    let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     while is_alive() {
-        let payload = receive(&mut stream, is_alive)?;
+        let payload = receive(stream, is_alive)?;
         match payload.get("kind") {
             Some(kind) => {
                 match kind.as_str().unwrap() {
@@ -54,15 +55,15 @@ fn handle_client(mut stream:&TcpStream, ip_version:&u8) -> BoxResult<()> {
                             let mut stream_ports = Vec::new();
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
-                                for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
+                                for _ in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
                                     let test = udp::receiver::UdpReceiver::new(test_definition.clone(), ip_version, &0)?;
                                     stream_ports.push(test.get_port()?);
-                                    parallel_streams.push(Box::new(test));
+                                    parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             } else { //TCP
                                 
                             }
-                            send(&mut stream, &prepare_connect(&stream_ports))?;
+                            send(stream, &prepare_connect(&stream_ports))?;
                         } else { //upload
                             log::debug!("running in reverse-mode: server will be uploading data");
                             
@@ -70,25 +71,26 @@ fn handle_client(mut stream:&TcpStream, ip_version:&u8) -> BoxResult<()> {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
                                 for port in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap() {
                                     let test = udp::sender::UdpSender::new(
-                                        test_definition,
+                                        test_definition.clone(),
                                         ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
                                     )?;
-                                    parallel_streams.push(Box::new(test));
+                                    parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             } else { //TCP
                                 
                             }
-                            send(&mut stream, &prepare_connected())?;
+                            send(stream, &prepare_connected())?;
                         }
                     },
                     "begin" => {
                         if !started {
-                            for parallel_stream in &parallel_streams {
+                            for parallel_stream in parallel_streams.iter_mut() {
+                                let c_ps = Arc::clone(&parallel_stream);
                                 let handle = thread::spawn(move || {
                                     loop {
-                                        match parallel_stream.run_interval() {
+                                        match c_ps.lock().unwrap().run_interval() {
                                             Some(interval_result) => {
                                                 //write the result into an std::sync::mpsc instance, which another thread will harvest and forward to the client
                                             },
@@ -122,10 +124,17 @@ fn handle_client(mut stream:&TcpStream, ip_version:&u8) -> BoxResult<()> {
     }
     
     //ensure everything has ended
-    for ps in &parallel_streams {
-        ps.stop();
+    for ps in parallel_streams.iter_mut() {
+        let mut stream = match (*ps).lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                log::error!("a stream-handler was poisoned; this indicates some sort of logic error");
+                poisoned.into_inner()
+            },
+        };
+        stream.stop();
     }
-    for jh in &parallel_streams_joinhandles {
+    for jh in parallel_streams_joinhandles {
         match jh.join() {
             Ok(_) => (),
             Err(e) => log::error!("error in parallel stream: {:?}", e),
@@ -171,7 +180,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
             match event.token() {
                 _ => loop {
                     match listener.accept() {
-                        Ok((stream, address)) => {
+                        Ok((mut stream, address)) => {
                             log::info!("connection from {}", address);
                             
                             stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
@@ -180,7 +189,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             clients.insert(address.to_string(), false);
                             
                             thread::spawn(move || {
-                                match handle_client(&stream, &ip_version) {
+                                match handle_client(&mut stream, &ip_version) {
                                     Ok(_) => (),
                                     Err(e) => log::error!("error in client-handler: {:?}", e),
                                 }
