@@ -1,6 +1,7 @@
 extern crate log;
 
 use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration};
 
 use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
@@ -68,7 +69,7 @@ pub mod receiver {
     }
     
     pub struct UdpReceiver {
-        active: bool,
+        active: AtomicBool,
         test_definition: super::UdpTestDefinition,
         history: UdpReceiverHistory,
         
@@ -103,7 +104,7 @@ pub mod receiver {
             )?;
             
             Ok(UdpReceiver{
-                active: true,
+                active: AtomicBool::new(true),
                 test_definition: test_definition,
                 history: UdpReceiverHistory{
                     packets_received: 0,
@@ -227,7 +228,7 @@ pub mod receiver {
             let mio_poll_token = self.mio_poll_token;
             let start = Instant::now();
             
-            while self.active {
+            while self.active.load(Ordering::Relaxed) {
                 let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
                 if poll_result.is_err() {
                     return Some(Err(Box::new(poll_result.unwrap_err())));
@@ -309,7 +310,7 @@ pub mod receiver {
         }
         
         fn stop(&mut self) {
-            self.active = false;
+            self.active.store(false, Ordering::Relaxed);
         }
     }
 }
@@ -325,7 +326,7 @@ pub mod sender {
     use std::thread::{sleep};
     
     pub struct UdpSender {
-        active: bool,
+        active: AtomicBool,
         test_definition: super::UdpTestDefinition,
         
         socket: UdpSocket,
@@ -363,7 +364,7 @@ pub mod sender {
             staged_packet[0..16].copy_from_slice(&test_definition.test_id);
             
             Ok(UdpSender{
-                active: true,
+                active: AtomicBool::new(true),
                 test_definition: test_definition,
                 
                 socket: socket,
@@ -403,7 +404,7 @@ pub mod sender {
             
             let cycle_start = Instant::now();
             
-            while self.active && self.remaining_duration > 0.0 {
+            while self.active.load(Ordering::Relaxed) && self.remaining_duration > 0.0 {
                 let packet_start = Instant::now();
                 
                 self.prepare_packet();
@@ -462,7 +463,7 @@ pub mod sender {
         }
         
         fn stop(&mut self) {
-            self.active = false;
+            self.active.store(false, Ordering::Relaxed);
         }
     }
 }
