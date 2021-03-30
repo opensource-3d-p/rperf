@@ -96,15 +96,6 @@ fn main() {
                 .possible_values(&["json", "bit", "byte"])
         )
         .arg(
-            Arg::with_name("interval")
-                .help("the number of seconds to wait between periodic status reports in non-JSON modes; 0 to disable")
-                .takes_value(true)
-                .long("interval")
-                .short("i")
-                .required(false)
-                .default_value("0")
-        )
-        .arg(
             Arg::with_name("udp")
                 .help("use UDP rather than TCP")
                 .takes_value(false)

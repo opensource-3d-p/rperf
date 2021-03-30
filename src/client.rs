@@ -90,7 +90,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         if args.is_present("udp") {
             let test_definition = udp::build_udp_test_definition(&download_config)?;
-            for _ in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
+            for i in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
                 let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &ip_version, &0)?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -118,7 +118,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 "connect" => { //we need to connect to the server
                     if args.is_present("udp") {
                         let test_definition = udp::build_udp_test_definition(&upload_config)?;
-                        for port in connection_payload.get("streamPorts").unwrap().as_array().unwrap() {
+                        for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
                             let test = udp::sender::UdpSender::new(
                                 test_definition.clone(),
                                 &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
