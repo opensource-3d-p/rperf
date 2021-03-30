@@ -13,6 +13,7 @@ pub const TEST_HEADER_SIZE:u16 = 36;
 const POLL_TIMEOUT:Duration = Duration::new(0, 250_000_000);
 const UPDATE_INTERVAL:Duration = Duration::new(1, 0);
 
+#[derive(Clone)]
 pub struct UdpTestDefinition {
     //a UUID used to identify packets associated with this test
     pub test_id: [u8; 16],
@@ -22,19 +23,28 @@ pub struct UdpTestDefinition {
     pub length: u16,
 }
 pub fn build_udp_test_definition(details:&serde_json::Value) -> super::BoxResult<UdpTestDefinition> {
-    let mut test_id_bytes:[u8; 16] = [0; 16];
-    for (i, v) in details.get("testId")?.as_array()?.iter().enumerate() {
-        test_id_bytes[i] = v.as_i64()? as u8;
+    let mut test_id_bytes = [0_u8; 16];
+    for (i, v) in details.get("testId").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
+        if i >= 16 { //avoid out-of-bounds if given malicious data
+            break;
+        }
+        test_id_bytes[i] = v.as_i64().unwrap_or(0) as u8;
     }
     
-    UdpTestDefinition{
-        test_id: test_id_bytes,
-        bandwidth: details.get("bandwidth")?.as_f64()? as u64,
-        length: details.get("length")?.as_i64()? as u16,
+    let length = details.get("length").unwrap_or(&serde_json::json!(TEST_HEADER_SIZE)).as_i64().unwrap() as u16;
+    if length < TEST_HEADER_SIZE {
+        return Err(Box::new(simple_error::simple_error!(std::format!("{} is too short of a length to satisfy testing requirements", length))));
     }
+    
+    Ok(UdpTestDefinition{
+        test_id: test_id_bytes,
+        bandwidth: details.get("bandwidth").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as u64,
+        length: length,
+    })
 }
 
 pub mod receiver {
+    use std::convert::TryInto;
     use std::fmt::{format};
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     
@@ -70,22 +80,22 @@ pub mod receiver {
         framing_size: u64,
     }
     impl UdpReceiver {
-        fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
+        pub fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u64;
             if *ip_version == 4 {
                 framing_size = 28;
-                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port));
+                socket = UdpSocket::bind(&format!("0.0.0.0:{}", port).parse::<std::net::SocketAddr>()?).expect(&format!("failed to bind UDP socket, port {}", port));
             } else if *ip_version == 6 {
                 framing_size = 48;
-                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect(format!("failed to bind UDP socket, port {}", port));
+                socket = UdpSocket::bind(&format!(":::{}", port).parse::<std::net::SocketAddr>()?).expect(&format!("failed to bind UDP socket, port {}", port));
             } else {
-                return Err(format!("unsupported IP version: {}", ip_version));
+                return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
             }
             
             let mio_poll_token = Token(0);
             let mut mio_poll = Poll::new()?;
-            mio_poll.registry().register(
+            mio_poll.register(
                 &socket,
                 mio_poll_token,
                 Ready::readable(),
@@ -117,7 +127,7 @@ pub mod receiver {
             })
         }
         
-        fn process_packets_ordering(&mut self, packet_id:&u64) -> bool {
+        fn process_packets_ordering(&mut self, packet_id:u64) -> bool {
             /* the algorithm from iperf3 provides a pretty decent approximation
              * for tracking lost and out-of-order packets efficiently, so it's
              * been minimally reimplemented here, with corrections.
@@ -128,7 +138,7 @@ pub mod receiver {
                 self.history.next_packet_id += 1;
                 return true;
             } else if packet_id > self.history.next_packet_id { //something was either lost or there's an ordering problem
-                self.history.lost_packets += packet_id - self.history.next_packet_id; //assume everything in between has been lost
+                self.history.lost_packets += (packet_id - self.history.next_packet_id) as i64; //assume everything in between has been lost
                 self.history.next_packet_id = packet_id + 1; //anticipate that ordered receipt will resume
             } else { //a packet with a previous ID was received; this is either a duplicate or an ordering issue
                 //CAUTION: this is where the approximation part of the algorithm comes into play
@@ -150,7 +160,7 @@ pub mod receiver {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
             let current_timestamp = NaiveDateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos());
             
-            let time_delta = current_timestamp - timestamp;
+            let time_delta = current_timestamp - *timestamp;
             
             let time_delta_nanoseconds = time_delta.num_nanoseconds();
             if time_delta_nanoseconds.is_none() {
@@ -181,20 +191,20 @@ pub mod receiver {
             }
             
             //the next eight bytes are the packet's ID, in big-endian order
-            let packet_id = u64::from_be_bytes(&packet[16..24]);
+            let packet_id = u64::from_be_bytes(packet[16..24].try_into().unwrap());
             
             //except for the timestamp, nothing else in the packet actually matters
             
             self.history.packets_received += 1;
-            if self.process_packets_ordering(&packet_id) {
+            if self.process_packets_ordering(packet_id) {
                 //the second eight are the number of seconds since the UNIX epoch, in big-endian order
-                let origin_seconds = i64::from_be_bytes(&packet[24..32]);
+                let origin_seconds = i64::from_be_bytes(packet[24..32].try_into().unwrap());
                 //and the following four are the number of nanoseconds since the UNIX epoch
-                let origin_nanoseconds = u32::from_be_bytes(&packet[32..36]);
+                let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into().unwrap());
                 let source_timestamp = NaiveDateTime::from_timestamp(origin_seconds, origin_nanoseconds);
                 
                 self.history.unbroken_sequence += 1;
-                self.process_jitter(source_timestamp);
+                self.process_jitter(&source_timestamp);
             } else {
                 self.history.unbroken_sequence = 0;
                 self.history.jitter_seconds = None;
@@ -204,9 +214,9 @@ pub mod receiver {
         }
     }
     impl crate::stream::TestStream for UdpReceiver {
-        fn run_interval(&self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
             let mut events = Events::with_capacity(1); //only watching one socket
-            let mut buf = vec![0_u8; self.test_definition.length];
+            let mut buf = vec![0_u8; self.test_definition.length.into()];
             
             let mut bytes_received:u64 = 0;
             let initial_packets_received = self.history.packets_received;
@@ -218,7 +228,10 @@ pub mod receiver {
             let start = Instant::now();
             
             while self.active {
-                self.poll.poll(&mut events, Some(super::POLL_TIMEOUT))?;
+                let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
+                if poll_result.is_err() {
+                    return Some(Err(Box::new(poll_result.unwrap_err())));
+                }
                 for event in events.iter() {
                     match event.token() {
                         mio_poll_token => loop {
@@ -230,18 +243,18 @@ pub mod receiver {
                                             break;
                                         }
                                     }
-                                    if packet_size < super::TEST_HEADER_SIZE {
+                                    if packet_size < super::TEST_HEADER_SIZE as usize {
                                         log::error!("received malformed packet with size {}", packet_size);
                                         continue
                                     }
                                     
                                     if self.process_packet(&buf) {
-                                        bytes_received += packet_size + self.framing_size;
+                                        bytes_received += packet_size as u64 + self.framing_size;
                                         
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::UPDATE_INTERVAL {
-                                            return Some(Ok(super::UdpReceiveResult{
-                                                duration: elapsed_time.as_secs_f64(),
+                                            return Some(Ok(&super::UdpReceiveResult{
+                                                duration: elapsed_time.as_secs_f32(),
                                                 
                                                 bytes_received: bytes_received,
                                                 packets_received: self.history.packets_received - initial_packets_received,
@@ -262,7 +275,7 @@ pub mod receiver {
                                     break;
                                 },
                                 Err(e) => {
-                                    return Some(Err(e));
+                                    return Some(Err(Box::new(e)));
                                 },
                             }
                         },
@@ -273,8 +286,8 @@ pub mod receiver {
                 }
             }
             if bytes_received > 0 {
-                Some(Ok(super::UdpReceiveResult{
-                    duration: start.elapsed().as_secs_f64(),
+                Some(Ok(&super::UdpReceiveResult{
+                    duration: start.elapsed().as_secs_f32(),
                     
                     bytes_received: bytes_received,
                     packets_received: self.history.packets_received - initial_packets_received,
@@ -328,26 +341,26 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
+        pub fn new(test_definition:super::UdpTestDefinition, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
             let framing_size:u64;
-            if ip_version == 4 {
+            if *ip_version == 4 {
                 framing_size = 28;
-                socket = UdpSocket::bind(format!("0.0.0.0:{}", port).parse()?).expect("failed to bind socket");
-            } else if ip_version == 6 {
+                socket = UdpSocket::bind(&format!("0.0.0.0:{}", port).parse::<std::net::SocketAddr>()?).expect("failed to bind socket");
+            } else if *ip_version == 6 {
                 framing_size = 48;
-                socket = UdpSocket::bind(format!(":::{}", port).parse()?).expect("failed to bind socket");
+                socket = UdpSocket::bind(&format!(":::{}", port).parse::<std::net::SocketAddr>()?).expect("failed to bind socket");
             } else {
-                return Err(format!("unsupported IP version: {}", ip_version));
+                return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
             }
-            socket.connect(format!("{}:{}", receiver_host, receiver_port))?;
+            socket.connect(format!("{}:{}", receiver_host, receiver_port).parse()?)?;
             
-            let mut staged_packet = vec![0_u8; test_definition.length];
-            for i in super::TEST_HEADER_SIZE..(staged_packet.len()) { //fill the packet with a fixed sequence
-                staged_packet[i] = i %256;
+            let mut staged_packet = vec![0_u8; test_definition.length.into()];
+            for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) { //fill the packet with a fixed sequence
+                staged_packet[i as usize] = (i % 256) as u8;
             }
             //embed the test ID
-            staged_packet[0..16].copy_from_slice(test_definition.test_id);
+            staged_packet[0..16].copy_from_slice(&test_definition.test_id);
             
             Ok(UdpSender{
                 active: true,
@@ -369,20 +382,20 @@ pub mod sender {
             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
             
             //eight bytes after the test ID are the packet's ID, in big-endian order
-            self.staged_packet[16..24].copy_from_slice(self.next_packet_id.to_be_bytes());
+            self.staged_packet[16..24].copy_from_slice(&self.next_packet_id.to_be_bytes());
             
             //the next eight are the seconds part of the UNIX timestamp and the following four are the nanoseconds
-            self.staged_packet[24..32].copy_from_slice(now.as_secs().to_be_bytes());
-            self.staged_packet[32..36].copy_from_slice(now.subsec_nanos().to_be_bytes());
+            self.staged_packet[24..32].copy_from_slice(&now.as_secs().to_be_bytes());
+            self.staged_packet[32..36].copy_from_slice(&now.subsec_nanos().to_be_bytes());
             
             //prepare for the next packet
             self.next_packet_id += 1;
         }
     }
     impl crate::stream::TestStream for UdpSender {
-        fn run_interval(&self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<&dyn super::IntervalResult>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
-            let bytes_per_interval = ((self.test_definition.bandwidth as f64) * self.send_interval) as u64;
+            let bytes_per_interval = ((self.test_definition.bandwidth as f32) * self.send_interval) as u64;
             let mut bytes_per_interval_remaining = bytes_per_interval;
             
             let mut packets_sent:u64 = 0;
@@ -394,17 +407,17 @@ pub mod sender {
                 let packet_start = Instant::now();
                 
                 self.prepare_packet();
-                match self.socket.send(self.staged_packet) {
+                match self.socket.send(&self.staged_packet) {
                     Ok(packet_size) => {
-                        let bytes_written = packet_size + self.framing_size;
-                        bytes_sent += bytes_written;
-                        bytes_per_interval_remaining -= bytes_written;
+                        let bytes_written = packet_size as u64 + self.framing_size;
+                        bytes_sent += bytes_written as u64;
+                        bytes_per_interval_remaining -= bytes_written as u64;
                         
                         let elapsed_time = cycle_start.elapsed();
                         if elapsed_time >= super::UPDATE_INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
-                            return Some(Ok(super::UdpSendResult{
+                            return Some(Ok(&super::UdpSendResult{
                                 duration: elapsed_time.as_secs_f32(),
                                 
                                 bytes_sent: bytes_sent,
@@ -413,7 +426,7 @@ pub mod sender {
                         }
                     },
                     Err(e) => {
-                        return Some(Err(e));
+                        return Some(Err(Box::new(e)));
                     },
                 }
                 
@@ -427,8 +440,8 @@ pub mod sender {
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
             }
             if bytes_sent > 0 {
-                Some(Ok(super::UdpSendResult{
-                    duration: cycle_start.elapsed().as_secs_f64(),
+                Some(Ok(&super::UdpSendResult{
+                    duration: cycle_start.elapsed().as_secs_f32(),
                     
                     bytes_sent: bytes_sent,
                     packets_sent: packets_sent,
@@ -436,7 +449,7 @@ pub mod sender {
             } else {
                 //indicate that the test is over by sending the test ID by itself
                 for i in 0..4 { //do it a few times in case of loss
-                    self.socket.send(self.staged_packet[0..16]);
+                    self.socket.send(&self.staged_packet[0..16]);
                 }
                 
                 None

@@ -33,7 +33,7 @@ pub fn calculate_duration(bandwidth:u64, bytes:u64, seconds:f32) -> f32 {
             ((bytes as f64) / (bandwidth as f64)) as f32
         } else {
             log::warn!("bandwidth was not specified; setting duration to 0s");
-            0
+            0.0
         }
     } else if seconds > 0.0 { //seconds were specified; just use that
         seconds
@@ -43,7 +43,7 @@ pub fn calculate_duration(bandwidth:u64, bytes:u64, seconds:f32) -> f32 {
     }
 }
 
-pub fn calculate_length_udp(length:u32) -> u32 {
+pub fn calculate_length_udp(length:u16) -> u16 {
     if length < crate::stream::udp::TEST_HEADER_SIZE { //length must be at least enough to hold the test data
         crate::stream::udp::TEST_HEADER_SIZE
     } else {

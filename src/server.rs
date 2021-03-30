@@ -18,6 +18,7 @@ use crate::protocol::messaging::{
     prepare_connect, prepare_connected,
 };
 
+use crate::stream::TestStream;
 use crate::stream::tcp;
 use crate::stream::udp;
 
@@ -37,38 +38,43 @@ lazy_static::lazy_static!{
 fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     
-    let mut parallel_streams:Vec<dyn crate::stream::TestStream> = Vec::new();
+    let mut parallel_streams:Vec<&dyn TestStream> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     while is_alive() {
         let payload = receive(&mut stream, is_alive)?;
         match payload.get("kind") {
             Some(kind) => {
-                match kind.as_str()? {
+                match kind.as_str().unwrap() {
                     "configuration" => { //we either need to connect streams to the client or prepare to receive connections
-                        if payload.get("role")?.as_str()? == "download" {
+                        if payload.get("role").unwrap_or(&serde_json::json!("download")).as_str().unwrap() == "download" {
                             log::debug!("running in forward-mode: server will be receiving data");
                             
                             let mut stream_ports = Vec::new();
-                            if payload.get("family")?.as_str()? == "udp" {
+                            if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
-                                for i in 0..(payload.get("streams")?.as_i64()?) {
-                                    let test = Box::new(udp::receiver::UdpReceiver::new(test_definition.clone(), ip_version, &0)?);
-                                    parallel_streams.push(test);
+                                for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
+                                    let test = udp::receiver::UdpReceiver::new(test_definition.clone(), ip_version, &0)?;
+                                    parallel_streams.push(&test);
                                     stream_ports.push(test.get_port()?);
                                 }
                             } else { //TCP
                                 
                             }
-                            send(&mut stream, &prepare_connect(stream_ports))?;
+                            send(&mut stream, &prepare_connect(&stream_ports))?;
                         } else { //upload
                             log::debug!("running in reverse-mode: server will be uploading data");
                             
-                            if payload.get("family")?.as_str()? == "udp" {
+                            if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 let test_definition = udp::build_udp_test_definition(&payload)?;
-                                for port in payload.get("streamPorts")?.as_array()? {
-                                    let test = Box::new(udp::sender::UdpSender::new(test_definition, ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64()? as u16), payload["duration"].as_f64() as f32, payload["sendInterval"].as_f64() as f32)?);
-                                    parallel_streams.push(test);
+                                for port in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap() {
+                                    let test = udp::sender::UdpSender::new(
+                                        test_definition,
+                                        ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
+                                        &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
+                                        &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
+                                    )?;
+                                    parallel_streams.push(&test);
                                 }
                             } else { //TCP
                                 
@@ -109,10 +115,10 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
     }
     
     //ensure everything has ended
-    for ps in parallel_streams {
+    for ps in &parallel_streams {
         ps.stop();
     }
-    for jh in parallel_streams_joinhandles {
+    for jh in &parallel_streams_joinhandles {
         match jh.join() {
             Ok(_) => (),
             Err(e) => log::error!("error in parallel stream: {:?}", e),

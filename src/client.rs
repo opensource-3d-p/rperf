@@ -14,6 +14,7 @@ use crate::protocol::messaging::{
     prepare_configuration_udp_upload, prepare_configuration_udp_download,
 };
 
+use crate::stream::TestStream;
 use crate::stream::tcp;
 use crate::stream::udp;
 
@@ -31,10 +32,10 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
     
     if args.is_present("udp") {
         log::debug!("preparing UDP download config");
-        prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, bytes, seconds, length, send_interval)
+        Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, bytes, seconds, length as u16, send_interval))
     } else {
         log::debug!("preparing TCP download config");
-        serde_json::json!({})
+        Ok(serde_json::json!({}))
     }
 }
 fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
@@ -43,10 +44,10 @@ fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<ser
     
     if args.is_present("udp") {
         log::debug!("preparing UDP download config");
-        prepare_configuration_udp_download(test_id, parallel_streams, length)
+        Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16))
     } else {
         log::debug!("preparing TCP download config");
-        serde_json::json!({})
+        Ok(serde_json::json!({}))
     }
 }
             
@@ -61,7 +62,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let port:u16 = args.value_of("port").unwrap().parse()?;
     let server_address = args.value_of("client").unwrap();
     
-    let test_id = uuid::Uuid::new_v4()?;
+    let test_id = uuid::Uuid::new_v4();
     
     let upload_config = prepare_upload_config(&args, test_id.as_bytes())?;
     let download_config = prepare_download_config(&args, test_id.as_bytes())?;
@@ -78,7 +79,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
     stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
     
-    let mut parallel_streams:Vec<dyn crate::stream::TestStream> = Vec::new();
+    let mut parallel_streams:Vec<&dyn TestStream> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     if args.is_present("reverse") {
@@ -88,16 +89,16 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         if args.is_present("udp") {
             let test_definition = udp::build_udp_test_definition(&download_config)?;
-            for i in 0..(download_config.get("streams")?.as_i64()?) {
-                let test = Box::new(udp::receiver::UdpReceiver::new(test_definition.clone(), &ip_version, &0)?);
-                parallel_streams.push(test);
+            for i in 0..(download_config.get("streams").unwrap().as_i64().unwrap()) {
+                let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &ip_version, &0)?;
+                parallel_streams.push(&test);
                 stream_ports.push(test.get_port()?);
             }
         } else { //TCP
             
         }
         
-        upload_config["streamPorts"] = serde_json::Value::Array(stream_ports);
+        upload_config["streamPorts"] = serde_json::json!(stream_ports);
         
         send(&mut stream, &upload_config)?;
     } else {
@@ -118,9 +119,14 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     "connect" => { //we need to connect to the server
                         if args.is_present("udp") {
                             let test_definition = udp::build_udp_test_definition(&upload_config)?;
-                            for port in payload.get("streamPorts")?.as_array()? {
-                                let test = Box::new(udp::sender::UdpSender::new(test_definition, ip_version, &0, server_address, &(port.as_i64()? as u16), upload_config["duration"].as_f64() as f32, upload_config["sendInterval"].as_f64() as f32)?);
-                                parallel_streams.push(test);
+                            for port in payload.get("streamPorts").unwrap().as_array().unwrap() {
+                                let test = udp::sender::UdpSender::new(
+                                    test_definition,
+                                    &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
+                                    &(upload_config["duration"].as_f64().unwrap() as f32),
+                                    &(upload_config["sendInterval"].as_f64().unwrap() as f32),
+                                )?;
+                                parallel_streams.push(&test);
                             }
                         } else { //TCP
                             
@@ -193,10 +199,10 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.shutdown(Shutdown::Both).unwrap_or_default();
     
     //ensure everything has ended
-    for ps in parallel_streams {
+    for ps in &parallel_streams {
         ps.stop();
     }
-    for jh in parallel_streams_joinhandles {
+    for jh in &parallel_streams_joinhandles {
         match jh.join() {
             Ok(_) => (),
             Err(e) => log::error!("error in parallel stream: {:?}", e),

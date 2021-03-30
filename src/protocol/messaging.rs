@@ -28,7 +28,7 @@ pub fn prepare_end() -> serde_json::Value {
     })
 }
 
-pub fn prepare_configuration_udp_upload(test_id:[u8; 16], streams:u8, bandwidth:u64, bytes:u64, seconds:f32, length:u32, send_interval:f32) -> serde_json::Value {
+pub fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, bytes:u64, seconds:f32, length:u16, send_interval:f32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
         
@@ -45,7 +45,7 @@ pub fn prepare_configuration_udp_upload(test_id:[u8; 16], streams:u8, bandwidth:
     })
 }
 
-pub fn prepare_configuration_udp_download(test_id:[u8; 16], streams:u8, length:u32) -> serde_json::Value {
+pub fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:u16) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
         

@@ -4,7 +4,7 @@ pub trait IntervalResult {
     fn to_json(&self) -> serde_json::Value;
     
     fn to_json_string(&self) -> String {
-        serde_json::to_string(self.to_json()).unwrap()
+        serde_json::to_string(&self.to_json()).unwrap()
     }
 }
 
@@ -22,19 +22,19 @@ pub struct UdpReceiveResult {
 }
 impl IntervalResult for UdpReceiveResult {
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({});
+        serde_json::json!({})
     }
 }
 
 pub struct UdpSendResult {
-    duration: f64,
+    duration: f32,
     
     bytes_sent: u64,
     packets_sent: u64,
 }
 impl IntervalResult for UdpSendResult {
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({});
+        serde_json::json!({})
     }
 }
 
