@@ -39,7 +39,7 @@ fn handle_client(mut stream:TcpStream, ip_version:&u8) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     let mut started = false;
     
-    let mut parallel_streams:Vec<&dyn TestStream> = Vec::new();
+    let mut parallel_streams:Vec<&(dyn TestStream + Sync + Send)> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     while is_alive() {

@@ -79,7 +79,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
     stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
     
-    let mut parallel_streams:Vec<&dyn TestStream> = Vec::new();
+    let mut parallel_streams:Vec<&(dyn TestStream + Sync + Send)> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     
     if args.is_present("reverse") {
