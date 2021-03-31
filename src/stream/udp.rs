@@ -325,7 +325,7 @@ pub mod receiver {
         }
         
         fn get_idx(&self) -> u8 {
-            return self.stream_idx.to_owned();
+            self.stream_idx.to_owned()
         }
         
         fn stop(&mut self) {
@@ -505,7 +505,7 @@ pub mod sender {
         }
         
         fn get_idx(&self) -> u8 {
-            return self.stream_idx.to_owned();
+            self.stream_idx.to_owned()
         }
         
         fn stop(&mut self) {
