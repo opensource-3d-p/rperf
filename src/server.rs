@@ -73,9 +73,13 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                             
                             let mut stream_ports = Vec::new();
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
-                                let test_definition = udp::build_udp_test_definition(&payload)?;
+                                let test_definition = udp::UdpTestDefinition::new(&payload)?;
                                 for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
-                                    let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &(i as u8), ip_version, &0)?;
+                                    let test = udp::receiver::UdpReceiver::new(
+                                        test_definition.clone(), &(i as u8),
+                                        ip_version, &0,
+                                        &(payload["receiveBuffer"].as_i64().unwrap() as u32),
+                                    )?;
                                     stream_ports.push(test.get_port()?);
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
@@ -87,13 +91,14 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                             log::debug!("running in reverse-mode: server will be uploading data");
                             
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
-                                let test_definition = udp::build_udp_test_definition(&payload)?;
+                                let test_definition = udp::UdpTestDefinition::new(&payload)?;
                                 for (i, port) in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
                                     let test = udp::sender::UdpSender::new(
                                         test_definition.clone(), &(i as u8),
                                         ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
+                                        &(payload["sendBuffer"].as_i64().unwrap() as u32),
                                     )?;
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }

@@ -28,7 +28,7 @@ pub fn prepare_end() -> serde_json::Value {
     })
 }
 
-pub fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, bytes:u64, seconds:f32, length:u16, send_interval:f32) -> serde_json::Value {
+pub fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, bytes:u64, seconds:f32, length:u16, send_buffer:u32, send_interval:f32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
         
@@ -41,11 +41,12 @@ pub fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth
         "bandwidth": configuration::validate_bandwidth(bandwidth),
         "duration": configuration::calculate_duration(bandwidth, bytes, seconds),
         "length": configuration::calculate_length_udp(length),
+        "sendBuffer": send_buffer,
         "sendInterval": configuration::validate_send_interval(send_interval),
     })
 }
 
-pub fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:u16) -> serde_json::Value {
+pub fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:u16, receive_buffer:u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
         
@@ -56,5 +57,6 @@ pub fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:
         "streams": configuration::validate_streams(streams),
         
         "length": configuration::calculate_length_udp(length),
+        "receiveBuffer": receive_buffer,
     })
 }

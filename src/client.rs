@@ -36,6 +36,7 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
     let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
     let mut send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
+    let send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
     
     if seconds <= 0.0 {
         log::warn!("time was not in an acceptable range and has been set to 0.0");
@@ -52,7 +53,7 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
         if length == 0 {
             length = 1024;
         }
-        Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, bytes, seconds, length as u16, send_interval))
+        Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, bytes, seconds, length as u16, send_buffer, send_interval))
     } else {
         log::debug!("preparing TCP download config");
         if length == 0 {
@@ -64,13 +65,14 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
 fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
+    let receive_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
     
     if args.is_present("udp") {
         log::debug!("preparing UDP download config");
         if length == 0 {
             length = 1024;
         }
-        Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16))
+        Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16, receive_buffer))
     } else {
         log::debug!("preparing TCP download config");
         if length == 0 {
@@ -198,14 +200,27 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         let mut stream_ports = Vec::new();
         
         if args.is_present("udp") {
-            let test_definition = udp::build_udp_test_definition(&download_config)?;
+            let test_definition = udp::UdpTestDefinition::new(&download_config)?;
             for i in 0..stream_count {
-                let test = udp::receiver::UdpReceiver::new(test_definition.clone(), &(i as u8), &ip_version, &0)?;
+                let test = udp::receiver::UdpReceiver::new(
+                    test_definition.clone(), &(i as u8),
+                    &ip_version, &0,
+                    &(download_config["receiveBuffer"].as_i64().unwrap() as u32),
+                )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
         } else { //TCP
             
+            
+            /*
+            nodelay: details.get("nodelay").unwrap_or(&serde_json::json!(false)).as_bool().unwrap(),
+            send_buffer: details.get("send_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
+            receive_buffer: details.get("receive_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
+            mss: details.get("mss").unwrap_or(&serde_json::json!(1024)).as_i64().unwrap() as u32,
+            congestion_algorithm: details.get("congestion_algorithm").unwrap_or(&serde_json::json!("")).as_str(),
+            */
+                    
         }
         
         upload_config["streamPorts"] = serde_json::json!(stream_ports);
@@ -224,17 +239,29 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
             match kind.as_str().unwrap_or_default() {
                 "connect" => { //we need to connect to the server
                     if args.is_present("udp") {
-                        let test_definition = udp::build_udp_test_definition(&upload_config)?;
+                        let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
                         for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
                             let test = udp::sender::UdpSender::new(
                                 test_definition.clone(), &(i as u8),
                                 &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
+                                &(upload_config["sendBuffer"].as_i64().unwrap() as u32),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
                     } else { //TCP
+                        
+                        
+                        /*
+                        nodelay: details.get("nodelay").unwrap_or(&serde_json::json!(false)).as_bool().unwrap(),
+                        send_buffer: details.get("send_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
+                        receive_buffer: details.get("receive_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
+                        mss: details.get("mss").unwrap_or(&serde_json::json!(1024)).as_i64().unwrap() as u32,
+                        congestion_algorithm: details.get("congestion_algorithm").unwrap_or(&serde_json::json!("")).as_str(),
+                        */
+                        
+                        
                         
                     }
                 },

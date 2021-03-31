@@ -1,9 +1,11 @@
 extern crate log;
+extern crate nix;
 
 use std::error::Error;
 use std::time::{Duration};
 
 use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
+use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
@@ -22,25 +24,27 @@ pub struct UdpTestDefinition {
     //the length of the buffer to exchange
     pub length: u16,
 }
-pub fn build_udp_test_definition(details:&serde_json::Value) -> super::BoxResult<UdpTestDefinition> {
-    let mut test_id_bytes = [0_u8; 16];
-    for (i, v) in details.get("testId").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
-        if i >= 16 { //avoid out-of-bounds if given malicious data
-            break;
+impl UdpTestDefinition {
+    pub fn new(details:&serde_json::Value) -> super::BoxResult<UdpTestDefinition> {
+        let mut test_id_bytes = [0_u8; 16];
+        for (i, v) in details.get("testId").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
+            if i >= 16 { //avoid out-of-bounds if given malicious data
+                break;
+            }
+            test_id_bytes[i] = v.as_i64().unwrap_or(0) as u8;
         }
-        test_id_bytes[i] = v.as_i64().unwrap_or(0) as u8;
+        
+        let length = details.get("length").unwrap_or(&serde_json::json!(TEST_HEADER_SIZE)).as_i64().unwrap() as u16;
+        if length < TEST_HEADER_SIZE {
+            return Err(Box::new(simple_error::simple_error!(std::format!("{} is too short of a length to satisfy testing requirements", length))));
+        }
+        
+        Ok(UdpTestDefinition{
+            test_id: test_id_bytes,
+            bandwidth: details.get("bandwidth").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as u64,
+            length: length,
+        })
     }
-    
-    let length = details.get("length").unwrap_or(&serde_json::json!(TEST_HEADER_SIZE)).as_i64().unwrap() as u16;
-    if length < TEST_HEADER_SIZE {
-        return Err(Box::new(simple_error::simple_error!(std::format!("{} is too short of a length to satisfy testing requirements", length))));
-    }
-    
-    Ok(UdpTestDefinition{
-        test_id: test_id_bytes,
-        bandwidth: details.get("bandwidth").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as u64,
-        length: length,
-    })
 }
 
 pub mod receiver {
@@ -80,7 +84,7 @@ pub mod receiver {
         framing_size: u16,
     }
     impl UdpReceiver {
-        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16) -> super::BoxResult<UdpReceiver> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receive_buffer:&u32) -> super::BoxResult<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -91,6 +95,12 @@ pub mod receiver {
                 socket = UdpSocket::bind(&format!(":::{}", port).parse::<std::net::SocketAddr>()?).expect(&format!("failed to bind UDP socket, port {}", port));
             } else {
                 return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
+            }
+            if !cfg!(windows) { //NOTE: features unsupported on Windows
+                if receive_buffer != 0 {
+                    log::debug("setting receive-buffer to {}...", receive_buffer);
+                    super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
+                }
             }
             
             let mio_poll_token = Token(0);
@@ -351,7 +361,7 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32) -> super::BoxResult<UdpSender> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&u32) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -362,6 +372,12 @@ pub mod sender {
                 socket = UdpSocket::bind(&format!(":::{}", port).parse::<std::net::SocketAddr>()?).expect("failed to bind socket");
             } else {
                 return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
+            }
+            if !cfg!(windows) { //NOTE: features unsupported on Windows
+                if send_buffer != 0 {
+                    log::debug("setting send-buffer to {}...", send_buffer);
+                    super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
+                }
             }
             socket.connect(format!("{}:{}", receiver_host, receiver_port).parse()?)?;
             

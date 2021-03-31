@@ -664,3 +664,35 @@ impl TestResults for UdpTestResults {
         output
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+//TODO: apply this to UDP, too
+Just make it an argument to the serialisers
+
+
+        
+        .arg(
+            Arg::with_name("omit")
+                .help("omit a number of seconds from the start of calculations to avoid including TCP ramp-up in averages")
+                .takes_value(true)
+                .long("omit")
+                .short("O")
+                .default_value("0")
+                .required(false)
+        )
+        
+        
+*/
