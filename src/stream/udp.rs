@@ -406,8 +406,10 @@ pub mod sender {
     impl crate::stream::TestStream for UdpSender {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
-            let bytes_per_interval = ((self.test_definition.bandwidth as f32) * self.send_interval) as i64;
-            let mut bytes_per_interval_remaining = bytes_per_interval;
+            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::UPDATE_INTERVAL.as_secs_f32()) as i64;
+            let mut bytes_to_send_remaining = bytes_to_send;
+            let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
+            let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
             
             let mut packets_sent:u64 = 0;
             let mut bytes_sent:u64 = 0;
@@ -422,9 +424,10 @@ pub mod sender {
                     Ok(packet_size) => {
                         packets_sent += 1;
                         
-                        let bytes_written = packet_size + (self.framing_size as usize);
+                        let bytes_written = (packet_size + (self.framing_size as usize)) as i64;
                         bytes_sent += bytes_written as u64;
-                        bytes_per_interval_remaining -= bytes_written as i64;
+                        bytes_to_send_remaining -= bytes_written;
+                        bytes_to_send_per_interval_slice_remaining -= bytes_written;
                         
                         let elapsed_time = cycle_start.elapsed();
                         if elapsed_time >= super::UPDATE_INTERVAL {
@@ -445,8 +448,13 @@ pub mod sender {
                     },
                 }
                 
-                if bytes_per_interval_remaining <= 0 {
-                    bytes_per_interval_remaining = bytes_per_interval;
+                if bytes_to_send_remaining <= 0 { //interval's target is exhausted
+                    let elapsed_time = cycle_start.elapsed();
+                    if super::UPDATE_INTERVAL > elapsed_time {
+                        sleep(super::UPDATE_INTERVAL - elapsed_time);
+                    }
+                } else if bytes_to_send_per_interval_slice_remaining <= 0 { // interval subsection exhausted
+                    bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
                     let elapsed_time = cycle_start.elapsed();
                     if interval_duration > elapsed_time {
                         sleep(interval_duration - elapsed_time);

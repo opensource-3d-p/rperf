@@ -52,7 +52,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("debug")
-                .help("emit debug-level logging on stderr; default is info and above")
+                .help("emit debug-level logging on stderr; default is warn and above")
                 .takes_value(false)
                 .long("debug")
                 .short("d")
@@ -105,7 +105,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("bandwidth")
-                .help("target bandwidth in bits/sec; this value is applied to each stream, with a default target of 1 megabit/second for all protocols (note: megabit, not mebibit, and unlike iperf3, data is evenly distributed by resolution, not frontloaded)")
+                .help("target bandwidth in bits/sec; this value is applied to each stream, with a default target of 1 megabit/second for all protocols (note: megabit, not mebibit)")
                 .takes_value(true)
                 .long("bandwidth")
                 .short("b")
@@ -141,7 +141,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("length")
-                .help("length of the buffer to exchange; for TCP, this defaults to 128 kibibytes; for UDP, it's 1024 bytes ")
+                .help("length of the buffer to exchange; for TCP, this defaults to 128 kibibytes; for UDP, it's 1024 bytes")
                 .takes_value(true)
                 .long("length")
                 .short("l")
@@ -191,7 +191,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("sendinterval")
-                .help("the interval at which to send data, in seconds")
+                .help("the interval at which to send data, in seconds; this is used to spread packets out over time")
                 .takes_value(true)
                 .long("send-interval")
                 .required(false)

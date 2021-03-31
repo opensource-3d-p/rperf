@@ -31,27 +31,49 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
     let bytes:u64 = args.value_of("bytes").unwrap().parse()?;
-    let seconds:f32 = args.value_of("time").unwrap().parse()?;
-    let length:u32 = args.value_of("length").unwrap().parse()?;
-    let send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
+    let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
+    let mut send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
+    let mut length:u32 = args.value_of("length").unwrap().parse()?;
+    
+    if seconds <= 0.0 {
+        log::warn!("time was not in an acceptable range and has been set to 0.0");
+        seconds = 0.0
+    }
+    
+    if send_interval > 1.0 || send_interval <= 0.0 {
+        log::warn!("send-interval was not in an acceptable range and has been set to 1.0");
+        send_interval = 1.0
+    }
     
     if args.is_present("udp") {
         log::debug!("preparing UDP download config");
+        if length == 0 {
+            length = 1024;
+        }
         Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, bytes, seconds, length as u16, send_interval))
     } else {
         log::debug!("preparing TCP download config");
+        if length == 0 {
+            length = 128 * 1024;
+        }
         Ok(serde_json::json!({}))
     }
 }
 fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
-    let length:u32 = args.value_of("length").unwrap().parse()?;
+    let mut length:u32 = args.value_of("length").unwrap().parse()?;
     
     if args.is_present("udp") {
         log::debug!("preparing UDP download config");
+        if length == 0 {
+            length = 1024;
+        }
         Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16))
     } else {
         log::debug!("preparing TCP download config");
+        if length == 0 {
+            length = 128 * 1024;
+        }
         Ok(serde_json::json!({}))
     }
 }
