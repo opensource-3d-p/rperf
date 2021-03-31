@@ -120,15 +120,27 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                             Some(interval_result) => match interval_result {
                                                 Ok(ir) => match c_results_tx.send(ir) {
                                                     Ok(_) => (),
-                                                    Err(e) => log::error!("unable to process interval-result: {}", e),
+                                                    Err(e) => {
+                                                        log::error!("unable to process interval-result: {}", e);
+                                                        break
+                                                    },
                                                 },
                                                 Err(e) => {
                                                     log::error!("unable to process stream: {}", e);
-                                                    c_results_tx.send(Box::new(crate::protocol::results::FailedResult{stream_idx: test.get_idx()})).unwrap();
+                                                    match c_results_tx.send(Box::new(crate::protocol::results::ServerFailedResult{stream_idx: test.get_idx()})) {
+                                                        Ok(_) => (),
+                                                        Err(e) => log::error!("unable to report interval-failed-result: {}", e),
+                                                    }
                                                     break;
                                                 },
                                             },
-                                            None => break,
+                                            None => {
+                                                match c_results_tx.send(Box::new(crate::protocol::results::ServerDoneResult{stream_idx: test.get_idx()})) {
+                                                    Ok(_) => (),
+                                                    Err(e) => log::error!("unable to report interval-done-result: {}", e),
+                                                }
+                                                break;
+                                            },
                                         }
                                     }
                                 });

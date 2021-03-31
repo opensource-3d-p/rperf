@@ -10,8 +10,10 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 #[derive(PartialEq)]
 pub enum IntervalResultKind {
-    Done,
-    Failed,
+    ClientDone,
+    ClientFailed,
+    ServerDone,
+    ServerFailed,
     TcpReceive,
     TcpSend,
     UdpReceive,
@@ -29,12 +31,12 @@ pub trait IntervalResult {
     fn to_string(&self, bit:bool) -> String;
 }
 
-pub struct DoneResult {
+pub struct ClientDoneResult {
     pub stream_idx: u8,
 }
-impl IntervalResult for DoneResult {
+impl IntervalResult for ClientDoneResult {
     fn kind(&self) -> IntervalResultKind{
-        IntervalResultKind::Done
+        IntervalResultKind::ClientDone
     }
     
     fn get_stream_idx(&self) -> u8 {
@@ -44,24 +46,52 @@ impl IntervalResult for DoneResult {
     fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "kind": "done",
+            "origin": "client",
             "stream_idx": self.stream_idx,
         })
     }
     
     fn to_string(&self, _bit:bool) -> String {
         format!("----------\n\
-                 End of stream | stream: {}",
+                 End of stream from client | stream: {}",
+                self.stream_idx,
+        )
+    }
+}
+pub struct ServerDoneResult {
+    pub stream_idx: u8,
+}
+impl IntervalResult for ServerDoneResult {
+    fn kind(&self) -> IntervalResultKind{
+        IntervalResultKind::ServerDone
+    }
+    
+    fn get_stream_idx(&self) -> u8 {
+        self.stream_idx
+    }
+    
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "done",
+            "origin": "server",
+            "stream_idx": self.stream_idx,
+        })
+    }
+    
+    fn to_string(&self, _bit:bool) -> String {
+        format!("----------\n\
+                 End of stream from server | stream: {}",
                 self.stream_idx,
         )
     }
 }
 
-pub struct FailedResult {
+pub struct ClientFailedResult {
     pub stream_idx: u8,
 }
-impl IntervalResult for FailedResult {
+impl IntervalResult for ClientFailedResult {
     fn kind(&self) -> IntervalResultKind{
-        IntervalResultKind::Failed
+        IntervalResultKind::ClientFailed
     }
     
     fn get_stream_idx(&self) -> u8 {
@@ -71,17 +101,46 @@ impl IntervalResult for FailedResult {
     fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "kind": "failed",
+            "origin": "client",
             "stream_idx": self.stream_idx,
         })
     }
     
     fn to_string(&self, _bit:bool) -> String {
         format!("----------\n\
-                 Failure in stream | stream: {}",
+                 Failure in client stream | stream: {}",
                 self.stream_idx,
         )
     }
 }
+pub struct ServerFailedResult {
+    pub stream_idx: u8,
+}
+impl IntervalResult for ServerFailedResult {
+    fn kind(&self) -> IntervalResultKind{
+        IntervalResultKind::ServerFailed
+    }
+    
+    fn get_stream_idx(&self) -> u8 {
+        self.stream_idx
+    }
+    
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "failed",
+            "origin": "server",
+            "stream_idx": self.stream_idx,
+        })
+    }
+    
+    fn to_string(&self, _bit:bool) -> String {
+        format!("----------\n\
+                 Failure in server stream | stream: {}",
+                self.stream_idx,
+        )
+    }
+}
+
 
 #[derive(Serialize, Deserialize)]
 pub struct UdpReceiveResult {
@@ -340,8 +399,12 @@ impl StreamResults for UdpStreamResults {
 
 
 pub trait TestResults {
-    fn count_in_progress_streams(&mut self) -> u8;
+    fn count_in_progress_streams(&self) -> u8;
     fn mark_stream_done(&mut self, idx:&u8, success:bool);
+    
+    fn count_in_progress_streams_server(&self) -> u8;
+    fn mark_stream_done_server(&mut self, idx:&u8);
+    
     fn is_success(&self) -> bool;
     
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()>;
@@ -361,6 +424,7 @@ pub struct UdpTestResults {
     stream_results: HashMap<u8, UdpStreamResults>,
     pending_tests: HashSet<u8>,
     failed_tests: HashSet<u8>,
+    server_tests_finished: HashSet<u8>,
 }
 impl UdpTestResults {
     pub fn new() -> UdpTestResults {
@@ -368,6 +432,7 @@ impl UdpTestResults {
             stream_results: HashMap::new(),
             pending_tests: HashSet::new(),
             failed_tests: HashSet::new(),
+            server_tests_finished: HashSet::new(),
         }
     }
     pub fn prepare_index(&mut self, idx:&u8) {
@@ -379,8 +444,8 @@ impl UdpTestResults {
     }
 }
 impl TestResults for UdpTestResults {
-    fn count_in_progress_streams(&mut self) -> u8 {
-        return self.pending_tests.len() as u8;
+    fn count_in_progress_streams(&self) -> u8 {
+        self.pending_tests.len() as u8
     }
     fn mark_stream_done(&mut self, idx:&u8, success:bool) {
         self.pending_tests.remove(idx);
@@ -388,6 +453,20 @@ impl TestResults for UdpTestResults {
             self.failed_tests.insert(*idx);
         }
     }
+    
+    fn count_in_progress_streams_server(&self) -> u8 {
+        let mut count:u8 = 0;
+        for idx in self.stream_results.keys() {
+            if !self.server_tests_finished.contains(idx) {
+                count += 1;
+            }
+        }
+        count
+    }
+    fn mark_stream_done_server(&mut self, idx:&u8) {
+        self.server_tests_finished.insert(*idx);
+    }
+    
     fn is_success(&self) -> bool {
         self.pending_tests.len() == 0 && self.failed_tests.len() == 0
     }
