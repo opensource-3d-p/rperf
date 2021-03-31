@@ -270,9 +270,70 @@ impl StreamResults for UdpStreamResults {
     }
     
     fn to_json(&self) -> serde_json::Value {
+        let mut duration_send:f64 = 0.0;
+        let mut bytes_sent:u64 = 0;
+        let mut packets_sent:u64 = 0;
+        
+        
+        let mut duration_receive:f64 = 0.0;
+        
+        let mut bytes_received:u64 = 0;
+        let mut packets_received:u64 = 0;
+        let mut packets_out_of_order:u64 = 0;
+        let mut packets_duplicate:u64 = 0;
+        
+        let mut jitter_calculated = false;
+        let mut unbroken_sequence_count:u64 = 0;
+        let mut jitter_weight:f64 = 0.0;
+        
+        for sr in &(self.send_results) {
+            duration_send += sr.duration as f64;
+            
+            bytes_sent += sr.bytes_sent;
+            packets_sent += sr.packets_sent;
+        }
+        
+        for rr in &(self.receive_results) {
+            duration_receive += rr.duration as f64;
+            
+            bytes_received += rr.bytes_received;
+            packets_received += rr.packets_received;
+            packets_out_of_order += rr.packets_out_of_order;
+            packets_duplicate += rr.packets_duplicate;
+            
+            if rr.jitter_seconds.is_some() {
+                jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                unbroken_sequence_count += rr.unbroken_sequence;
+                
+                jitter_calculated = true;
+            }
+        }
+        
+        let mut summary = serde_json::json!({
+            "framed_packet_size": bytes_sent / packets_sent,
+            
+            "duration_send": duration_send,
+            "bytes_sent": bytes_sent,
+            "packets_sent": packets_sent,
+            
+            
+            "duration_receive": duration_receive,
+            
+            "bytes_received": bytes_received,
+            "packets_received": packets_received,
+            "packets_lost": packets_sent - packets_received,
+            "packets_out_of_order": packets_out_of_order,
+            "packets_duplicate": packets_duplicate,
+        });
+        if jitter_calculated {
+            summary["jitter_average"] = serde_json::json!(jitter_weight / (unbroken_sequence_count as f64));
+            summary["jitter_packets_consecutive"] = serde_json::json!(unbroken_sequence_count);
+        }
+        
         serde_json::json!({
             "receive": self.receive_results.iter().map(|rr| rr.to_result_json()).collect::<Vec<serde_json::Value>>(),
             "send": self.send_results.iter().map(|sr| sr.to_result_json()).collect::<Vec<serde_json::Value>>(),
+            "summary": summary,
         })
     }
 }
