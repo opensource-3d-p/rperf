@@ -4,6 +4,7 @@ extern crate lazy_static;
 
 use clap::{App, Arg};
 
+mod cpu_affinity;
 mod client;
 mod server;
 mod stream;
@@ -44,11 +45,11 @@ fn main() {
             Arg::with_name("affinity")
                 .help("specify logical CPUs, delimited by commas, across which to round-robin affinity; not supported on all systems")
                 .takes_value(true)
-                .long("file")
+                .long("affinity")
                 .short("A")
                 .required(false)
                 .multiple(true)
-                .default_value("-1")
+                .default_value("")
         )
         .arg(
             Arg::with_name("debug")
@@ -179,14 +180,6 @@ fn main() {
                 .takes_value(false)
                 .long("no-delay")
                 .short("N")
-                .required(false)
-        )
-        .arg(
-            Arg::with_name("congestion")
-                .help("use a specific TCP congestion-control algorithm for traffic-shaping")
-                .takes_value(false)
-                .long("congestion")
-                .short("C")
                 .required(false)
         )
         .arg(

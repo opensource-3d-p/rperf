@@ -25,7 +25,7 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 static ALIVE:AtomicBool = AtomicBool::new(true);
 static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
-const KILL_TIMEOUT:u64 = 4; //once testing finishes, allow a few seconds for the server to respond
+const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the server to respond
 
 fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
@@ -81,6 +81,8 @@ fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<ser
 
 pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut complete = false;
+    
+    let cpu_affinity_manager = Arc::new(Mutex::new(super::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let display_json:bool;
     let display_bit:bool;
@@ -164,6 +166,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                             } else {
                                 log::info!("stream {} failed", result.get_stream_idx());
                             }
+                            //TODO: differentiate between ClientDone/Failed and ServerDone/Failed
+                            //if there's a server result for every stream index, call kill() to end as soon as possible
                             tr.mark_stream_done(&result.get_stream_idx(), result.kind() == crate::protocol::results::IntervalResultKind::Done);
                             if tr.count_in_progress_streams() == 0 {
                                 log::info!("giving the server a few seconds to report any errors...");
@@ -253,7 +257,11 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         for parallel_stream in parallel_streams.iter_mut() {
             let c_ps = Arc::clone(&parallel_stream);
             let c_results_tx = results_tx.clone();
+            let c_cam = cpu_affinity_manager.clone();
             let handle = thread::spawn(move || {
+                { //set CPU affinity, if enabled
+                    c_cam.lock().unwrap().set_affinity();
+                }
                 loop {
                     let mut test = c_ps.lock().unwrap();
                     log::debug!("beginning test-interval for stream {}", test.get_idx());

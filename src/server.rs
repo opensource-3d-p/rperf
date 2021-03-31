@@ -38,7 +38,7 @@ lazy_static::lazy_static!{
 }
 
 
-fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
+fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc<Mutex<super::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     let mut started = false;
     
@@ -108,7 +108,11 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
                             for parallel_stream in parallel_streams.iter_mut() {
                                 let c_ps = Arc::clone(&parallel_stream);
                                 let c_results_tx = results_tx.clone();
+                                let c_cam = cpu_affinity_manager.clone();
                                 let handle = thread::spawn(move || {
+                                    { //set CPU affinity, if enabled
+                                        c_cam.lock().unwrap().set_affinity();
+                                    }
                                     loop {
                                         let mut test = c_ps.lock().unwrap();
                                         log::debug!("beginning test-interval for stream {}", test.get_idx());
@@ -175,6 +179,8 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
 }
 
 pub fn serve(args:ArgMatches) -> BoxResult<()> {
+    let cpu_affinity_manager = Arc::new(Mutex::new(super::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
+    
     let ip_version:u8;
     if args.is_present("version6") {
         ip_version = 6;
@@ -217,8 +223,9 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             
                             CLIENTS.insert(address.to_string(), false);
                             
+                            let c_cam = cpu_affinity_manager.clone();
                             thread::spawn(move || {
-                                match handle_client(&mut stream, &ip_version) {
+                                match handle_client(&mut stream, &ip_version, c_cam) {
                                     Ok(_) => (),
                                     Err(e) => log::error!("error in client-handler: {}", e),
                                 }
