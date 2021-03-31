@@ -120,7 +120,6 @@ fn main() {
                 .short("t")
                 .required(false)
                 .default_value("10.0")
-                .conflicts_with("bytes")
         )
         .arg(
             Arg::with_name("bytes")
@@ -130,7 +129,6 @@ fn main() {
                 .short("y")
                 .required(false)
                 .default_value("0")
-                .conflicts_with("time")
         )
         .arg(
             Arg::with_name("omit")

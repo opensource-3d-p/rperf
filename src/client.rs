@@ -1,9 +1,10 @@
 use std::error::Error;
 use std::net::{Shutdown};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
 use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::ArgMatches;
 
@@ -23,6 +24,8 @@ use crate::stream::udp;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 static ALIVE:AtomicBool = AtomicBool::new(true);
+static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
+const KILL_TIMEOUT:u64 = 4; //once testing finishes, allow a few seconds for the server to respond
 
 fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
@@ -55,6 +58,8 @@ fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<ser
             
 
 pub fn execute(args:ArgMatches) -> BoxResult<()> {
+    let mut complete = false;
+    
     let display_json:bool;
     let display_bit:bool;
     match args.value_of("format").unwrap() {
@@ -95,7 +100,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     log::info!("connecting to server at {}:{}...", server_address, port);
     let stream_result = TcpStream::connect(&format!("{}:{}", server_address, port).parse()?);
     if stream_result.is_err() {
-        return Err(Box::new(simple_error::simple_error!(format!("unable to connect: {:?}", stream_result.unwrap_err()).as_str())));
+        return Err(Box::new(simple_error::simple_error!("unable to connect: {}", stream_result.unwrap_err())));
     }
     let mut stream = stream_result.unwrap();
     log::info!("connected to server");
@@ -107,7 +112,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     
-    let mut test_results:Mutex<Box<dyn crate::protocol::results::TestResults>>;
+    let test_results:Mutex<Box<dyn crate::protocol::results::TestResults>>;
     if args.is_present("udp") {
         let mut udp_test_results = crate::protocol::results::UdpTestResults::new();
         for i in 0..stream_count {
@@ -121,7 +126,6 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>) = channel();
     
-    let mut end_notifying_stream = stream.try_clone()?;
     let mut results_handler = || -> BoxResult<()> {
         loop {
             match results_rx.try_recv() {
@@ -131,18 +135,23 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     }
                     
                     let mut tr = test_results.lock().unwrap();
-                    if result.kind() == crate::protocol::results::IntervalResultKind::Done {
-                        log::info!("stream {} is done", result.get_stream_idx());
-                        
-                        tr.mark_stream_done(&result.get_stream_idx());
-                        if tr.count_in_progress_streams() == 0 {
-                            thread::sleep(std::time::Duration::from_secs(1)); //wait one second for the server to send any remaining test-data
-                            send(&mut end_notifying_stream, &prepare_end())?;
-                            thread::sleep(std::time::Duration::from_millis(500)); //wait a moment for the shutdown to finish cleanly
-                            kill();
+                    match result.kind() {
+                        crate::protocol::results::IntervalResultKind::Done | crate::protocol::results::IntervalResultKind::Failed => {
+                            if result.kind() == crate::protocol::results::IntervalResultKind::Done {
+                                log::info!("stream {} is done", result.get_stream_idx());
+                            } else {
+                                log::info!("stream {} failed", result.get_stream_idx());
+                            }
+                            tr.mark_stream_done(&result.get_stream_idx(), result.kind() == crate::protocol::results::IntervalResultKind::Done);
+                            if tr.count_in_progress_streams() == 0 {
+                                log::info!("giving the server a few seconds to report any errors...");
+                                complete = true;
+                                start_kill_timer(KILL_TIMEOUT);
+                            }
+                        },
+                        _ => {
+                            tr.update_from_json(result.to_json())?;
                         }
-                    } else {
-                        tr.update_from_json(result.to_json())?;
                     }
                 },
                 Err(_) => break, //whether it's empty or disconnected, there's nothing to do
@@ -217,6 +226,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         //tell the server to start
         send(&mut stream, &prepare_begin())?;
         
+        log::debug!("spawning stream-threads");
         //begin the test-streams
         for parallel_stream in parallel_streams.iter_mut() {
             let c_ps = Arc::clone(&parallel_stream);
@@ -224,16 +234,21 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
             let handle = thread::spawn(move || {
                 loop {
                     let mut test = c_ps.lock().unwrap();
+                    log::debug!("beginning test-interval for stream {}", test.get_idx());
                     match test.run_interval() {
                         Some(interval_result) => match interval_result {
                             Ok(ir) => match c_results_tx.send(ir) {
                                 Ok(_) => (),
-                                Err(e) => log::error!("unable to process interval-result: {:?}", e),
+                                Err(e) => log::error!("unable to process interval-result: {}", e),
                             },
-                            Err(e) => log::error!("unable to process stream: {:?}", e),
+                            Err(e) => {
+                                log::error!("unable to process stream: {}", e);
+                                c_results_tx.send(Box::new(crate::protocol::results::FailedResult{stream_idx: test.get_idx()})).unwrap();
+                                break;
+                            },
                         },
                         None => {
-                            c_results_tx.send(Box::new(crate::protocol::results::DoneResult{stream_idx: test.get_idx()}));
+                            c_results_tx.send(Box::new(crate::protocol::results::DoneResult{stream_idx: test.get_idx()})).unwrap();
                             break;
                         },
                     }
@@ -244,35 +259,55 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         
         //watch for events from the server
         while is_alive() {
-            let payload = receive(&mut stream, is_alive, &mut results_handler)?;
-            
-            match payload.get("kind") {
-                Some(kind) => {
-                    match kind.as_str().unwrap_or_default() {
-                        "receive" | "send" => { //receive-results from the server
-                            if !display_json {
-                                let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
-                                println!("{}", result.to_string(display_bit));
-                            }
-                            {
-                                let mut tr = test_results.lock().unwrap();
-                                tr.update_from_json(payload)?;
+            match receive(&mut stream, is_alive, &mut results_handler) {
+                Ok(payload) => {
+                    match payload.get("kind") {
+                        Some(kind) => {
+                            match kind.as_str().unwrap_or_default() {
+                                "receive" | "send" => { //receive-results from the server
+                                    if !display_json {
+                                        let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
+                                        println!("{}", result.to_string(display_bit));
+                                    }
+                                    let mut tr = test_results.lock().unwrap();
+                                    tr.update_from_json(payload)?;
+                                },
+                                "failed" => match payload.get("stream_idx") { //failure-result from the server
+                                    Some(stream_idx) => match stream_idx.as_i64() {
+                                        Some(idx64) => {
+                                            log::error!("server reported failure with stream {}", idx64);
+                                            let mut tr = test_results.lock().unwrap();
+                                            tr.mark_stream_done(&(idx64 as u8), false);
+                                        },
+                                        None => log::error!("failure from server did not include a valid stream_idx"),
+                                    },
+                                    None => log::error!("failure from server did not include stream_idx"),
+                                },
+                                _ => {
+                                    log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
+                                    break;
+                                },
                             }
                         },
-                        _ => {
+                        None => {
                             log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
                             break;
                         },
                     }
                 },
-                None => {
-                    log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
+                Err(e) => {
+                    if !complete { //when complete, this also occurs
+                        return Err(e);
+                    }
                     break;
                 },
             }
         }
     }
     
+    //assume this is a controlled shutdown
+    send(&mut stream, &prepare_end()).unwrap_or_default();
+    thread::sleep(Duration::from_millis(500)); //wait a moment for the shutdown to finish cleanly
     stream.shutdown(Shutdown::Both).unwrap_or_default();
     
     //ensure everything has ended
@@ -293,8 +328,14 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         }
     }
     
-    //TODO: display final results
-    //this will probably just be joining on the display thread
+    {
+        let tr = test_results.lock().unwrap();
+        if display_json {
+            println!("{}", tr.to_json_string());
+        } else {
+            println!("{}", tr.to_string(display_bit));
+        }
+    }
     
     Ok(())
 }
@@ -302,6 +343,15 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
 pub fn kill() -> bool {
     ALIVE.swap(false, Ordering::Relaxed)
 }
+fn start_kill_timer(timeout:u64) {
+    KILL_TIMER.swap(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + timeout, Ordering::Relaxed);
+}
 fn is_alive() -> bool {
+    let kill_timer = KILL_TIMER.load(Ordering::Relaxed);
+    if kill_timer != 0 { //initialised
+        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= kill_timer {
+            return false;
+        }
+    }
     ALIVE.load(Ordering::Relaxed)
 }

@@ -110,13 +110,19 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8) -> BoxResult<()> {
                                 let c_results_tx = results_tx.clone();
                                 let handle = thread::spawn(move || {
                                     loop {
-                                        match c_ps.lock().unwrap().run_interval() {
+                                        let mut test = c_ps.lock().unwrap();
+                                        log::debug!("beginning test-interval for stream {}", test.get_idx());
+                                        match test.run_interval() {
                                             Some(interval_result) => match interval_result {
                                                 Ok(ir) => match c_results_tx.send(ir) {
                                                     Ok(_) => (),
-                                                    Err(e) => log::error!("unable to process interval-result: {:?}", e),
+                                                    Err(e) => log::error!("unable to process interval-result: {}", e),
                                                 },
-                                                Err(e) => log::error!("unable to process stream: {:?}", e),
+                                                Err(e) => {
+                                                    log::error!("unable to process stream: {}", e);
+                                                    c_results_tx.send(Box::new(crate::protocol::results::FailedResult{stream_idx: test.get_idx()})).unwrap();
+                                                    break;
+                                                },
                                             },
                                             None => break,
                                         }
@@ -214,7 +220,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             thread::spawn(move || {
                                 match handle_client(&mut stream, &ip_version) {
                                     Ok(_) => (),
-                                    Err(e) => log::error!("error in client-handler: {:?}", e),
+                                    Err(e) => log::error!("error in client-handler: {}", e),
                                 }
                                 CLIENTS.remove(&address.to_string());
                                 stream.shutdown(Shutdown::Both).unwrap_or_default();

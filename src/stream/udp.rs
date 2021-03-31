@@ -11,6 +11,7 @@ pub const TEST_HEADER_SIZE:u16 = 36;
 
 const POLL_TIMEOUT:Duration = Duration::from_millis(250);
 const UPDATE_INTERVAL:Duration = Duration::from_secs(1);
+const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
 pub struct UdpTestDefinition {
@@ -56,9 +57,9 @@ pub mod receiver {
         
         next_packet_id: u64,
         
-        lost_packets: i64,
-        out_of_order_packets: u64,
-        duplicate_packets: u64,
+        packets_lost: i64,
+        packets_out_of_order: u64,
+        packets_duplicate: u64,
         
         unbroken_sequence: u64,
         jitter_seconds: Option<f32>,
@@ -110,9 +111,9 @@ pub mod receiver {
                     
                     next_packet_id: 0,
                     
-                    lost_packets: 0,
-                    out_of_order_packets: 0,
-                    duplicate_packets: 0,
+                    packets_lost: 0,
+                    packets_out_of_order: 0,
+                    packets_duplicate: 0,
                     
                     unbroken_sequence: 0,
                     jitter_seconds: None,
@@ -138,15 +139,15 @@ pub mod receiver {
                 self.history.next_packet_id += 1;
                 return true;
             } else if packet_id > self.history.next_packet_id { //something was either lost or there's an ordering problem
-                self.history.lost_packets += (packet_id - self.history.next_packet_id) as i64; //assume everything in between has been lost
+                self.history.packets_lost += (packet_id - self.history.next_packet_id) as i64; //assume everything in between has been lost
                 self.history.next_packet_id = packet_id + 1; //anticipate that ordered receipt will resume
             } else { //a packet with a previous ID was received; this is either a duplicate or an ordering issue
                 //CAUTION: this is where the approximation part of the algorithm comes into play
-                if self.history.lost_packets > 0 { //assume it's an ordering issue in the common case
-                    self.history.lost_packets -= 1;
-                    self.history.out_of_order_packets += 1;
+                if self.history.packets_lost > 0 { //assume it's an ordering issue in the common case
+                    self.history.packets_lost -= 1;
+                    self.history.packets_out_of_order += 1;
                 } else { //the only other thing it could be is a duplicate; in practice, duplicates don't tend to show up alongside losses; non-zero is always bad, though
-                    self.history.duplicate_packets += 1;
+                    self.history.packets_duplicate += 1;
                 }
             }
             return false;
@@ -219,13 +220,17 @@ pub mod receiver {
             
             let mut bytes_received:u64 = 0;
             let initial_packets_received = self.history.packets_received;
-            let initial_lost_packets = self.history.lost_packets;
-            let initial_out_of_order_packets = self.history.out_of_order_packets;
-            let initial_duplicate_packets = self.history.duplicate_packets;
+            let initial_packets_lost = self.history.packets_lost;
+            let initial_packets_out_of_order = self.history.packets_out_of_order;
+            let initial_packets_duplicate = self.history.packets_duplicate;
             
             let start = Instant::now();
             
             while self.active {
+                if start.elapsed() >= super::RECEIVE_TIMEOUT {
+                    return Some(Err(Box::new(simple_error::simple_error!("UDP reception for stream {} timed out, likely because the end-signal was lost", self.stream_idx))));
+                }
+                
                 let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
                 if poll_result.is_err() {
                     return Some(Err(Box::new(poll_result.unwrap_err())));
@@ -258,9 +263,9 @@ pub mod receiver {
                                                 
                                                 bytes_received: bytes_received,
                                                 packets_received: self.history.packets_received - initial_packets_received,
-                                                lost_packets: self.history.lost_packets - initial_lost_packets,
-                                                out_of_order_packets: self.history.out_of_order_packets - initial_out_of_order_packets,
-                                                duplicate_packets: self.history.duplicate_packets - initial_duplicate_packets,
+                                                packets_lost: self.history.packets_lost - initial_packets_lost,
+                                                packets_out_of_order: self.history.packets_out_of_order - initial_packets_out_of_order,
+                                                packets_duplicate: self.history.packets_duplicate - initial_packets_duplicate,
                                                 
                                                 unbroken_sequence: self.history.unbroken_sequence,
                                                 jitter_seconds: self.history.jitter_seconds,
@@ -292,9 +297,9 @@ pub mod receiver {
                     
                     bytes_received: bytes_received,
                     packets_received: self.history.packets_received - initial_packets_received,
-                    lost_packets: self.history.lost_packets - initial_lost_packets,
-                    out_of_order_packets: self.history.out_of_order_packets - initial_out_of_order_packets,
-                    duplicate_packets: self.history.duplicate_packets - initial_duplicate_packets,
+                    packets_lost: self.history.packets_lost - initial_packets_lost,
+                    packets_out_of_order: self.history.packets_out_of_order - initial_packets_out_of_order,
+                    packets_duplicate: self.history.packets_duplicate - initial_packets_duplicate,
                     
                     unbroken_sequence: self.history.unbroken_sequence,
                     jitter_seconds: self.history.jitter_seconds,

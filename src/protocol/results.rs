@@ -2,7 +2,6 @@ extern crate log;
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fmt::format;
 
 use serde::{Serialize, Deserialize};
 
@@ -12,6 +11,7 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 #[derive(PartialEq)]
 pub enum IntervalResultKind {
     Done,
+    Failed,
     TcpReceive,
     TcpSend,
     UdpReceive,
@@ -48,9 +48,36 @@ impl IntervalResult for DoneResult {
         })
     }
     
-    fn to_string(&self, bit:bool) -> String {
+    fn to_string(&self, _bit:bool) -> String {
         format!("----------\n\
                  End of stream | stream: {}",
+                self.stream_idx,
+        )
+    }
+}
+
+pub struct FailedResult {
+    pub stream_idx: u8,
+}
+impl IntervalResult for FailedResult {
+    fn kind(&self) -> IntervalResultKind{
+        IntervalResultKind::Failed
+    }
+    
+    fn get_stream_idx(&self) -> u8 {
+        self.stream_idx
+    }
+    
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "failed",
+            "stream_idx": self.stream_idx,
+        })
+    }
+    
+    fn to_string(&self, _bit:bool) -> String {
+        format!("----------\n\
+                 Failure in stream | stream: {}",
                 self.stream_idx,
         )
     }
@@ -64,16 +91,24 @@ pub struct UdpReceiveResult {
     
     pub bytes_received: u64,
     pub packets_received: u64,
-    pub lost_packets: i64,
-    pub out_of_order_packets: u64,
-    pub duplicate_packets: u64,
+    pub packets_lost: i64,
+    pub packets_out_of_order: u64,
+    pub packets_duplicate: u64,
     
     pub unbroken_sequence: u64,
     pub jitter_seconds: Option<f32>,
 }
-fn udp_receive_result_from_json(value:serde_json::Value) -> BoxResult<UdpReceiveResult> {
-    let receive_result:UdpReceiveResult = serde_json::from_value(value)?;
-    Ok(receive_result)
+impl UdpReceiveResult {
+    fn from_json(value:serde_json::Value) -> BoxResult<UdpReceiveResult> {
+        let receive_result:UdpReceiveResult = serde_json::from_value(value)?;
+        Ok(receive_result)
+    }
+    
+    fn to_result_json(&self) -> serde_json::Value {
+        let mut serialised = serde_json::to_value(self).unwrap();
+        serialised.as_object_mut().unwrap().remove("stream_idx");
+        serialised
+    }
 }
 impl IntervalResult for UdpReceiveResult {
     fn kind(&self) -> IntervalResultKind{
@@ -112,10 +147,10 @@ impl IntervalResult for UdpReceiveResult {
                  packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
                 self.duration, self.stream_idx,
                 self.bytes_received, bytes_per_second, throughput,
-                self.packets_received, self.lost_packets, self.out_of_order_packets, self.duplicate_packets, self.packets_received as f32 / duration_divisor,
+                self.packets_received, self.packets_lost, self.packets_out_of_order, self.packets_duplicate, self.packets_received as f32 / duration_divisor,
         );
         if self.jitter_seconds.is_some() {
-            output.push_str(&format!("\njitter: {:.6}s over {} packets", self.jitter_seconds.unwrap(), self.unbroken_sequence));
+            output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", self.jitter_seconds.unwrap(), self.unbroken_sequence));
         }
         output
     }
@@ -130,9 +165,17 @@ pub struct UdpSendResult {
     pub bytes_sent: u64,
     pub packets_sent: u64,
 }
-fn udp_send_result_from_json(value:serde_json::Value) -> BoxResult<UdpSendResult> {
-    let send_result:UdpSendResult = serde_json::from_value(value)?;
-    Ok(send_result)
+impl UdpSendResult {
+    fn from_json(value:serde_json::Value) -> BoxResult<UdpSendResult> {
+        let send_result:UdpSendResult = serde_json::from_value(value)?;
+        Ok(send_result)
+    }
+    
+    fn to_result_json(&self) -> serde_json::Value {
+        let mut serialised = serde_json::to_value(self).unwrap();
+        serialised.as_object_mut().unwrap().remove("stream_idx");
+        serialised
+    }
 }
 impl IntervalResult for UdpSendResult {
     fn kind(&self) -> IntervalResultKind{
@@ -184,8 +227,8 @@ pub fn interval_result_from_json(value:serde_json::Value) -> BoxResult<Box<dyn I
                 "udp" => match value.get("kind") {
                     Some(k) => match k.as_str() {
                         Some(kind) => match kind {
-                            "receive" => Ok(Box::new(udp_receive_result_from_json(value)?)),
-                            "send" => Ok(Box::new(udp_send_result_from_json(value)?)),
+                            "receive" => Ok(Box::new(UdpReceiveResult::from_json(value)?)),
+                            "send" => Ok(Box::new(UdpSendResult::from_json(value)?)),
                             _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind: {}", kind))),
                         },
                         None => Err(Box::new(simple_error::simple_error!("interval-result's kind is not a string"))),
@@ -203,6 +246,8 @@ pub fn interval_result_from_json(value:serde_json::Value) -> BoxResult<Box<dyn I
 
 pub trait StreamResults {
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()>;
+    
+    fn to_json(&self) -> serde_json::Value;
 }
 
 struct UdpStreamResults {
@@ -214,8 +259,8 @@ impl StreamResults for UdpStreamResults {
         match value.get("kind") {
             Some(k) => match k.as_str() {
                 Some(kind) => match kind {
-                    "send" => Ok(self.send_results.push(udp_send_result_from_json(value)?)),
-                    "receive" => Ok(self.receive_results.push(udp_receive_result_from_json(value)?)),
+                    "send" => Ok(self.send_results.push(UdpSendResult::from_json(value)?)),
+                    "receive" => Ok(self.receive_results.push(UdpReceiveResult::from_json(value)?)),
                     _ => Err(Box::new(simple_error::simple_error!("unsupported kind for UDP stream-result: {}", kind))),
                 },
                 None => Err(Box::new(simple_error::simple_error!("kind must be a string for UDP stream-result"))),
@@ -223,20 +268,28 @@ impl StreamResults for UdpStreamResults {
             None => Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result"))),
         }
     }
+    
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "receive": self.receive_results.iter().map(|rr| rr.to_result_json()).collect::<Vec<serde_json::Value>>(),
+            "send": self.send_results.iter().map(|sr| sr.to_result_json()).collect::<Vec<serde_json::Value>>(),
+        })
+    }
 }
 
 
 pub trait TestResults {
     fn count_in_progress_streams(&mut self) -> u8;
-    fn mark_stream_done(&mut self, idx:&u8);
+    fn mark_stream_done(&mut self, idx:&u8, success:bool);
+    fn is_success(&self) -> bool;
     
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()>;
     
     fn to_json(&self) -> serde_json::Value;
     
     //produces a pretty-printed JSON string with the test results
-    fn to_json_string(&self, value:serde_json::Value) -> String {
-        serde_json::to_string_pretty(&value).unwrap()
+    fn to_json_string(&self) -> String {
+        serde_json::to_string_pretty(&self.to_json()).unwrap()
     }
     
     //produces test-results in tabular form
@@ -246,12 +299,14 @@ pub trait TestResults {
 pub struct UdpTestResults {
     stream_results: HashMap<u8, UdpStreamResults>,
     pending_tests: HashSet<u8>,
+    failed_tests: HashSet<u8>,
 }
 impl UdpTestResults {
     pub fn new() -> UdpTestResults {
         UdpTestResults{
             stream_results: HashMap::new(),
             pending_tests: HashSet::new(),
+            failed_tests: HashSet::new(),
         }
     }
     pub fn prepare_index(&mut self, idx:&u8) {
@@ -266,8 +321,14 @@ impl TestResults for UdpTestResults {
     fn count_in_progress_streams(&mut self) -> u8 {
         return self.pending_tests.len() as u8;
     }
-    fn mark_stream_done(&mut self, idx:&u8) {
+    fn mark_stream_done(&mut self, idx:&u8, success:bool) {
         self.pending_tests.remove(idx);
+        if !success {
+            self.failed_tests.insert(*idx);
+        }
+    }
+    fn is_success(&self) -> bool {
+        self.pending_tests.len() == 0 && self.failed_tests.len() == 0
     }
     
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()> {
@@ -293,10 +354,173 @@ impl TestResults for UdpTestResults {
     }
     
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({})
+        let mut duration_send:f64 = 0.0;
+        let mut bytes_sent:u64 = 0;
+        let mut packets_sent:u64 = 0;
+        
+        
+        let mut duration_receive:f64 = 0.0;
+        
+        let mut bytes_received:u64 = 0;
+        let mut packets_received:u64 = 0;
+        let mut packets_out_of_order:u64 = 0;
+        let mut packets_duplicate:u64 = 0;
+        
+        let mut jitter_calculated = false;
+        let mut unbroken_sequence_count:u64 = 0;
+        let mut jitter_weight:f64 = 0.0;
+        
+        
+        let mut streams = Vec::with_capacity(self.stream_results.len());
+        for (idx, stream) in self.stream_results.iter() {
+            streams.push(serde_json::json!({
+                "intervals": stream.to_json(),
+                "abandoned": self.pending_tests.contains(idx),
+                "failed": self.failed_tests.contains(idx),
+            }));
+            
+            for sr in &(stream.send_results) {
+                duration_send += sr.duration as f64;
+                
+                bytes_sent += sr.bytes_sent;
+                packets_sent += sr.packets_sent;
+            }
+            
+            for rr in &(stream.receive_results) {
+                duration_receive += rr.duration as f64;
+                
+                bytes_received += rr.bytes_received;
+                packets_received += rr.packets_received;
+                packets_out_of_order += rr.packets_out_of_order;
+                packets_duplicate += rr.packets_duplicate;
+                
+                if rr.jitter_seconds.is_some() {
+                    jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    unbroken_sequence_count += rr.unbroken_sequence;
+                    
+                    jitter_calculated = true;
+                }
+            }
+        }
+        
+        let mut summary = serde_json::json!({
+            "framed_packet_size": bytes_sent / packets_sent,
+            
+            "duration_send": duration_send,
+            "bytes_sent": bytes_sent,
+            "packets_sent": packets_sent,
+            
+            
+            "duration_receive": duration_receive,
+            
+            "bytes_received": bytes_received,
+            "packets_received": packets_received,
+            "packets_lost": packets_sent - packets_received,
+            "packets_out_of_order": packets_out_of_order,
+            "packets_duplicate": packets_duplicate,
+        });
+        if jitter_calculated {
+            summary["jitter_average"] = serde_json::json!(jitter_weight / (unbroken_sequence_count as f64));
+            summary["jitter_packets_consecutive"] = serde_json::json!(unbroken_sequence_count);
+        }
+        
+        serde_json::json!({
+            "streams": streams,
+            "summary": summary,
+            "success": self.is_success(),
+        })
     }
     
     fn to_string(&self, bit:bool) -> String {
-        "".to_string()
+        let mut duration_send:f64 = 0.0;
+        let mut bytes_sent:u64 = 0;
+        let mut packets_sent:u64 = 0;
+        
+        
+        let mut duration_receive:f64 = 0.0;
+        
+        let mut bytes_received:u64 = 0;
+        let mut packets_received:u64 = 0;
+        let mut packets_out_of_order:u64 = 0;
+        let mut packets_duplicate:u64 = 0;
+        
+        let mut jitter_calculated = false;
+        let mut unbroken_sequence_count:u64 = 0;
+        let mut jitter_weight:f64 = 0.0;
+        
+        
+        for stream in self.stream_results.values() {
+            for sr in &(stream.send_results) {
+                duration_send += sr.duration as f64;
+                
+                bytes_sent += sr.bytes_sent;
+                packets_sent += sr.packets_sent;
+            }
+            
+            for rr in &(stream.receive_results) {
+                duration_receive += rr.duration as f64;
+                
+                bytes_received += rr.bytes_received;
+                packets_received += rr.packets_received;
+                packets_out_of_order += rr.packets_out_of_order;
+                packets_duplicate += rr.packets_duplicate;
+                
+                if rr.jitter_seconds.is_some() {
+                    jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    unbroken_sequence_count += rr.unbroken_sequence;
+                    
+                    jitter_calculated = true;
+                }
+            }
+        }
+        
+        let send_duration_divisor;
+        if duration_send == 0.0 { //avoid zerodiv, which should be impossible, but safety
+            send_duration_divisor = 1.0;
+        } else {
+            send_duration_divisor = duration_send;
+        }
+        let send_bytes_per_second = bytes_sent as f64 / send_duration_divisor;
+        let send_throughput = match bit {
+            true => format!("megabits/second: {:.3}", send_bytes_per_second / (1_000_000.00 / 8.0)),
+            false => format!("megabytes/second: {:.3}", send_bytes_per_second / 1_000_000.00),
+        };
+        
+        let receive_duration_divisor;
+        if duration_receive == 0.0 { //avoid zerodiv, which should be impossible, but safety
+            receive_duration_divisor = 1.0;
+        } else {
+            receive_duration_divisor = duration_receive;
+        }
+        let receive_bytes_per_second = bytes_received as f64 / receive_duration_divisor;
+        let receive_throughput = match bit {
+            true => format!("megabits/second: {:.3}", receive_bytes_per_second / (1_000_000.00 / 8.0)),
+            false => format!("megabytes/second: {:.3}", receive_bytes_per_second / 1_000_000.00),
+        };
+        
+        let mut output = format!("==========\n\
+                                  UDP send result over {:.2}s | {} streams\n\
+                                  bytes: {} | per second: {:.3} | {}\n\
+                                  packets: {} per second: {:.3}\n\
+                                  ==========\n\
+                                  UDP receive result over {:.2}s | {} streams\n\
+                                  bytes: {} | per second: {:.3} | {}\n\
+                                  packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
+                                duration_send, self.stream_results.len(),
+                                bytes_sent, send_bytes_per_second, send_throughput,
+                                packets_sent, packets_sent as f64 / send_duration_divisor,
+                                
+                                duration_receive, self.stream_results.len(),
+                                bytes_received, receive_bytes_per_second, receive_throughput,
+                                packets_received, packets_sent - packets_received, packets_out_of_order, packets_duplicate, packets_received as f64 / receive_duration_divisor,
+        );
+        if jitter_calculated {
+            output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", jitter_weight / (unbroken_sequence_count as f64), unbroken_sequence_count));
+        }
+        if !self.is_success() {
+            output.push_str(&format!("\nTESTING DID NOT COMPLETE SUCCESSFULLY"));
+        }
+        
+        output
     }
 }
