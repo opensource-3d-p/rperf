@@ -272,6 +272,16 @@ pub mod receiver {
                                     if self.process_packet(&buf) {
                                         bytes_received += packet_size as u64 + self.framing_size as u64;
                                         
+                                        //if it's a mapped IPv4 address, subtract the IPv6 header-size delta
+                                        bytes_received -= match peer_addr.ip() {
+                                            IpAddr::V6(ip) => match ip.to_ipv4() {
+                                                Some(_) => 20,
+                                                None => 0,
+                                            },
+                                            _ => 0,
+                                        };
+                                        
+                                        
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::INTERVAL {
                                             return Some(Ok(Box::new(super::UdpReceiveResult{
