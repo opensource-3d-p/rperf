@@ -178,10 +178,14 @@ pub mod receiver {
     }
     impl crate::stream::TestStream for TcpReceiver {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+            let mut bytes_received:u64 = 0;
+            
             if self.stream.is_none() { //if still in the setup phase, receive the sender
                 match self.process_connection() {
                     Ok(stream) => {
                         self.stream = Some(stream);
+                        //NOTE: the connection process consumes the test-header; account for those bytes
+                        bytes_received += super::TEST_HEADER_SIZE as u64;
                     },
                     Err(e) => {
                         return Some(Err(e));
@@ -193,8 +197,6 @@ pub mod receiver {
             
             let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = vec![0_u8; self.test_definition.length];
-            
-            let mut bytes_received:u64 = 0;
             
             let start = Instant::now();
             
