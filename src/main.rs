@@ -4,11 +4,11 @@ extern crate lazy_static;
 
 use clap::{App, Arg};
 
-mod cpu_affinity;
+mod protocol;
+mod stream;
+mod utils;
 mod client;
 mod server;
-mod stream;
-mod protocol;
 
 fn main() {
     env_logger::init();
@@ -53,7 +53,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("debug")
-                .help("emit debug-level logging on stderr; default is warn and above")
+                .help("emit debug-level logging on stderr; default is info and above")
                 .takes_value(false)
                 .long("debug")
                 .short("d")
@@ -115,7 +115,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("time")
-                .help("the time in seconds for which to transmit, as an alternative to bytes; time is used by default")
+                .help("the time in seconds for which to transmit")
                 .takes_value(true)
                 .long("time")
                 .short("t")
@@ -123,13 +123,12 @@ fn main() {
                 .default_value("10.0")
         )
         .arg(
-            Arg::with_name("bytes")
-                .help("the number of bytes to transmit, as an alternative to time")
+            Arg::with_name("sendinterval")
+                .help("the interval at which to send batches of data, in seconds; this is used to evenly spread packets out over time")
                 .takes_value(true)
-                .long("bytes")
-                .short("y")
+                .long("send-interval")
                 .required(false)
-                .default_value("0")
+                .default_value("0.05")
         )
         .arg(
             Arg::with_name("length")
@@ -175,37 +174,12 @@ fn main() {
                 .required(false)
         )
         .arg(
-            Arg::with_name("nodelay")
+            Arg::with_name("no_delay")
                 .help("use no-delay mode for TCP tests, disabling Nagle's Algorithm")
                 .takes_value(false)
                 .long("no-delay")
                 .short("N")
                 .required(false)
-        )
-        .arg(
-            Arg::with_name("mss")
-                .help("maximum segment-size, for TCP tests (default is 1024 bytes) (only supported on some platforms)")
-                .takes_value(true)
-                .long("mss")
-                .short("M")
-                .required(false)
-                .default_value("1024")
-        )
-        .arg(
-            Arg::with_name("congestion")
-                .help("specify a congestion-control algorithm to use for TCP tests (only supported on some platforms)")
-                .takes_value(true)
-                .long("congestion")
-                .required(false)
-                .default_value("")
-        )
-        .arg(
-            Arg::with_name("sendinterval")
-                .help("the interval at which to send batches of data, in seconds; this is used to spread packets out over time")
-                .takes_value(true)
-                .long("send-interval")
-                .required(false)
-                .default_value("0.01")
         )
     .get_matches();
     

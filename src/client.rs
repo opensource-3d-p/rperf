@@ -14,10 +14,11 @@ use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
 use crate::protocol::messaging::{
     prepare_begin, prepare_end,
+    prepare_configuration_tcp_upload, prepare_configuration_tcp_download,
     prepare_configuration_udp_upload, prepare_configuration_udp_download,
 };
 
-use crate::protocol::results::{IntervalResult, IntervalResultKind};
+use crate::protocol::results::{IntervalResult, IntervalResultKind, TestResults, TcpTestResults, UdpTestResults};
 
 use crate::stream::TestStream;
 use crate::stream::tcp;
@@ -32,10 +33,10 @@ const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the
 fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
-    let bytes:u64 = args.value_of("bytes").unwrap().parse()?;
     let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
     let mut send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
+    
     let send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
     
     if seconds <= 0.0 {
@@ -44,22 +45,25 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
     }
     
     if send_interval > 1.0 || send_interval <= 0.0 {
-        log::warn!("send-interval was not in an acceptable range and has been set to 1.0");
-        send_interval = 1.0
+        log::warn!("send-interval was not in an acceptable range and has been set to 0.05");
+        send_interval = 0.05
     }
     
     if args.is_present("udp") {
-        log::debug!("preparing UDP download config");
+        log::debug!("preparing UDP upload config");
         if length == 0 {
             length = 1024;
         }
-        Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, bytes, seconds, length as u16, send_buffer, send_interval))
+        Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer))
     } else {
-        log::debug!("preparing TCP download config");
+        log::debug!("preparing TCP upload config");
         if length == 0 {
             length = 128 * 1024;
         }
-        Ok(serde_json::json!({}))
+        
+        let no_delay:bool = args.is_present("no_delay");
+        
+        Ok(prepare_configuration_tcp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer, no_delay))
     }
 }
 fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
@@ -78,7 +82,7 @@ fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<ser
         if length == 0 {
             length = 128 * 1024;
         }
-        Ok(serde_json::json!({}))
+        Ok(prepare_configuration_tcp_download(test_id, parallel_streams, length as u16, receive_buffer))
     }
 }
             
@@ -86,7 +90,7 @@ fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<ser
 pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut complete = false;
     
-    let cpu_affinity_manager = Arc::new(Mutex::new(super::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
+    let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let display_json:bool;
     let display_bit:bool;
@@ -126,11 +130,10 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     
     log::info!("connecting to server at {}:{}...", server_address, port);
-    let stream_result = TcpStream::connect(&format!("{}:{}", server_address, port).parse()?);
-    if stream_result.is_err() {
-        return Err(Box::new(simple_error::simple_error!("unable to connect: {}", stream_result.unwrap_err())));
-    }
-    let mut stream = stream_result.unwrap();
+    let mut stream = match TcpStream::connect(&format!("{}:{}", server_address, port).parse()?) {
+        Ok(s) => s,
+        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
+    };
     log::info!("connected to server");
     
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
@@ -140,16 +143,19 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     
-    let test_results:Mutex<Box<dyn crate::protocol::results::TestResults>>;
+    let test_results:Mutex<Box<dyn TestResults>>;
     if args.is_present("udp") {
-        let mut udp_test_results = crate::protocol::results::UdpTestResults::new();
+        let mut udp_test_results = UdpTestResults::new();
         for i in 0..stream_count {
             udp_test_results.prepare_index(&(i as u8));
         }
         test_results = Mutex::new(Box::new(udp_test_results));
     } else { //TCP
-        //FIXME: needs to be TCP
-        test_results = Mutex::new(Box::new(crate::protocol::results::UdpTestResults::new()));
+        let mut tcp_test_results = TcpTestResults::new();
+        for i in 0..stream_count {
+            tcp_test_results.prepare_index(&(i as u8));
+        }
+        test_results = Mutex::new(Box::new(tcp_test_results));
     }
     
     let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn IntervalResult + Sync + Send>>) = channel();
@@ -205,22 +211,22 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 let test = udp::receiver::UdpReceiver::new(
                     test_definition.clone(), &(i as u8),
                     &ip_version, &0,
-                    &(download_config["receiveBuffer"].as_i64().unwrap() as u32),
+                    &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
         } else { //TCP
-            
-            
-            /*
-            nodelay: details.get("nodelay").unwrap_or(&serde_json::json!(false)).as_bool().unwrap(),
-            send_buffer: details.get("send_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
-            receive_buffer: details.get("receive_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
-            mss: details.get("mss").unwrap_or(&serde_json::json!(1024)).as_i64().unwrap() as u32,
-            congestion_algorithm: details.get("congestion_algorithm").unwrap_or(&serde_json::json!("")).as_str(),
-            */
-                    
+            let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
+            for i in 0..stream_count {
+                let test = tcp::receiver::TcpReceiver::new(
+                    test_definition.clone(), &(i as u8),
+                    &ip_version, &0,
+                    &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
+                )?;
+                stream_ports.push(test.get_port()?);
+                parallel_streams.push(Arc::new(Mutex::new(test)));
+            }        
         }
         
         upload_config["streamPorts"] = serde_json::json!(stream_ports);
@@ -246,23 +252,23 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                                 &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
-                                &(upload_config["sendBuffer"].as_i64().unwrap() as u32),
+                                &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
                     } else { //TCP
-                        
-                        
-                        /*
-                        nodelay: details.get("nodelay").unwrap_or(&serde_json::json!(false)).as_bool().unwrap(),
-                        send_buffer: details.get("send_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
-                        receive_buffer: details.get("receive_buffer").unwrap_or(&serde_json::json!(0)).as_i64().unwrap() as u32,
-                        mss: details.get("mss").unwrap_or(&serde_json::json!(1024)).as_i64().unwrap() as u32,
-                        congestion_algorithm: details.get("congestion_algorithm").unwrap_or(&serde_json::json!("")).as_str(),
-                        */
-                        
-                        
-                        
+                        let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
+                        for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                            let test = tcp::sender::TcpSender::new(
+                                test_definition.clone(), &(i as u8),
+                                server_address.to_string(), &(port.as_i64().unwrap() as u16),
+                                &(upload_config["duration"].as_f64().unwrap() as f32),
+                                &(upload_config["sendInterval"].as_f64().unwrap() as f32),
+                                &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
+                                &(upload_config["noDelay"].as_bool().unwrap()),
+                            )?;
+                            parallel_streams.push(Arc::new(Mutex::new(test)));
+                        }
                     }
                 },
                 "connected" => { //server has connected to us
@@ -412,12 +418,13 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         }
     }
     
+    let omit_seconds:usize = args.value_of("omit").unwrap().parse()?;
     {
         let tr = test_results.lock().unwrap();
         if display_json {
-            println!("{}", tr.to_json_string());
+            println!("{}", tr.to_json_string(omit_seconds));
         } else {
-            println!("{}", tr.to_string(display_bit));
+            println!("{}", tr.to_string(display_bit, omit_seconds));
         }
     }
     

@@ -38,7 +38,7 @@ lazy_static::lazy_static!{
 }
 
 
-fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc<Mutex<super::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
+fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
     let peer_addr = stream.peer_addr()?;
     let mut started = false;
     
@@ -78,13 +78,22 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     let test = udp::receiver::UdpReceiver::new(
                                         test_definition.clone(), &(i as u8),
                                         ip_version, &0,
-                                        &(payload["receiveBuffer"].as_i64().unwrap() as u32),
+                                        &(payload["receiveBuffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             } else { //TCP
-                                
+                                let test_definition = tcp::TcpTestDefinition::new(&payload)?;
+                                for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
+                                    let test = tcp::receiver::TcpReceiver::new(
+                                        test_definition.clone(), &(i as u8),
+                                        &ip_version, &0,
+                                        &(payload["receiveBuffer"].as_i64().unwrap() as usize),
+                                    )?;
+                                    stream_ports.push(test.get_port()?);
+                                    parallel_streams.push(Arc::new(Mutex::new(test)));
+                                }
                             }
                             send(stream, &prepare_connect(&stream_ports))?;
                         } else { //upload
@@ -98,12 +107,23 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                         ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
-                                        &(payload["sendBuffer"].as_i64().unwrap() as u32),
+                                        &(payload["sendBuffer"].as_i64().unwrap() as usize),
                                     )?;
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             } else { //TCP
-                                
+                                let test_definition = tcp::TcpTestDefinition::new(&payload)?;
+                                for (i, port) in payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                                    let test = tcp::sender::TcpSender::new(
+                                        test_definition.clone(), &(i as u8),
+                                        peer_addr.ip().to_string(), &(port.as_i64().unwrap() as u16),
+                                        &(payload["duration"].as_f64().unwrap() as f32),
+                                        &(payload["sendInterval"].as_f64().unwrap() as f32),
+                                        &(payload["sendBuffer"].as_i64().unwrap() as usize),
+                                        &(payload["noDelay"].as_bool().unwrap()),
+                                    )?;
+                                    parallel_streams.push(Arc::new(Mutex::new(test)));
+                                }
                             }
                             send(stream, &prepare_connected())?;
                         }
@@ -196,7 +216,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
 }
 
 pub fn serve(args:ArgMatches) -> BoxResult<()> {
-    let cpu_affinity_manager = Arc::new(Mutex::new(super::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
+    let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let ip_version:u8;
     if args.is_present("version6") {

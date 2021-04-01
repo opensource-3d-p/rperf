@@ -49,6 +49,7 @@ impl UdpTestDefinition {
 
 pub mod receiver {
     use std::convert::TryInto;
+    use std::os::unix::io::AsRawFd;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     
     use chrono::{NaiveDateTime};
@@ -84,7 +85,7 @@ pub mod receiver {
         framing_size: u16,
     }
     impl UdpReceiver {
-        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receive_buffer:&u32) -> super::BoxResult<UdpReceiver> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receive_buffer:&usize) -> super::BoxResult<UdpReceiver> {
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -97,8 +98,8 @@ pub mod receiver {
                 return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
             }
             if !cfg!(windows) { //NOTE: features unsupported on Windows
-                if receive_buffer != 0 {
-                    log::debug("setting receive-buffer to {}...", receive_buffer);
+                if *receive_buffer != 0 {
+                    log::debug!("setting receive-buffer to {}...", receive_buffer);
                     super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
                 }
             }
@@ -337,6 +338,7 @@ pub mod receiver {
 
 
 pub mod sender {
+    use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use mio::net::UdpSocket;
@@ -361,7 +363,7 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&u32) -> super::BoxResult<UdpSender> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -374,8 +376,8 @@ pub mod sender {
                 return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
             }
             if !cfg!(windows) { //NOTE: features unsupported on Windows
-                if send_buffer != 0 {
-                    log::debug("setting send-buffer to {}...", send_buffer);
+                if *send_buffer != 0 {
+                    log::debug!("setting send-buffer to {}...", send_buffer);
                     super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
                 }
             }
