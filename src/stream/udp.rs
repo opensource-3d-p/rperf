@@ -49,6 +49,7 @@ impl UdpTestDefinition {
 
 pub mod receiver {
     use std::convert::TryInto;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::io::AsRawFd;
     use std::time::{Instant, SystemTime, UNIX_EPOCH};
     
@@ -90,10 +91,10 @@ pub mod receiver {
             let framing_size:u16;
             if *ip_version == 4 {
                 framing_size = 28;
-                socket = UdpSocket::bind(&format!("0.0.0.0:{}", port).parse::<std::net::SocketAddr>()?).expect(&format!("failed to bind UDP socket, port {}", port));
+                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
             } else if *ip_version == 6 {
                 framing_size = 48;
-                socket = UdpSocket::bind(&format!(":::{}", port).parse::<std::net::SocketAddr>()?).expect(&format!("failed to bind UDP socket, port {}", port));
+                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
             } else {
                 return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
             }
@@ -321,8 +322,8 @@ pub mod receiver {
         }
         
         fn get_port(&self) -> super::BoxResult<u16> {
-            let sock_addr = self.socket.local_addr()?;
-            Ok(sock_addr.port())
+            let socket_addr = self.socket.local_addr()?;
+            Ok(socket_addr.port())
         }
         
         fn get_idx(&self) -> u8 {
@@ -338,6 +339,7 @@ pub mod receiver {
 
 
 pub mod sender {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
@@ -365,13 +367,16 @@ pub mod sender {
     impl UdpSender {
         pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize) -> super::BoxResult<UdpSender> {
             let socket:UdpSocket;
+            let socket_addr_server:SocketAddr;
             let framing_size:u16;
             if *ip_version == 4 {
                 framing_size = 28;
-                socket = UdpSocket::bind(&format!("0.0.0.0:{}", port).parse::<std::net::SocketAddr>()?).expect("failed to bind socket");
+                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect("failed to bind socket");
+                socket_addr_server = SocketAddr::new(IpAddr::V4(receiver_host.parse()?), *receiver_port);
             } else if *ip_version == 6 {
                 framing_size = 48;
-                socket = UdpSocket::bind(&format!(":::{}", port).parse::<std::net::SocketAddr>()?).expect("failed to bind socket");
+                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect("failed to bind socket");
+                socket_addr_server = SocketAddr::new(IpAddr::V6(receiver_host.parse()?), *receiver_port);
             } else {
                 return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
             }
@@ -381,7 +386,7 @@ pub mod sender {
                     super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
                 }
             }
-            socket.connect(format!("{}:{}", receiver_host, receiver_port).parse()?)?;
+            socket.connect(socket_addr_server).expect("failed to connect socket");
             
             let mut staged_packet = vec![0_u8; test_definition.length.into()];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) { //fill the packet with a fixed sequence
@@ -502,8 +507,8 @@ pub mod sender {
         }
         
         fn get_port(&self) -> super::BoxResult<u16> {
-            let sock_addr = self.socket.local_addr()?;
-            Ok(sock_addr.port())
+            let socket_addr = self.socket.local_addr()?;
+            Ok(socket_addr.port())
         }
         
         fn get_idx(&self) -> u8 {

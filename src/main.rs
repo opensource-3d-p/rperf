@@ -11,18 +11,9 @@ mod client;
 mod server;
 
 fn main() {
-    env_logger::init();
-    
     let args = App::new("rperf")
-        .arg(
-            Arg::with_name("version")
-                .help("display version")
-                .takes_value(false)
-                .long("version")
-                .short("v")
-                .required(false)
-        )
-        
+        .version("0.0.1")
+        .about("validates network throughput capacity and reliability")
         .arg(
             Arg::with_name("version6")
                 .help("use IPv6")
@@ -183,6 +174,12 @@ fn main() {
         )
     .get_matches();
     
+    let mut env = env_logger::Env::default()
+        .filter_or("RUST_LOG", "info");
+    if args.is_present("debug") {
+        env = env.filter_or("RUST_LOG", "debug");
+    }
+    env_logger::init_from_env(env);
     
     if args.is_present("server") {
         log::debug!("registering SIGINT handler...");

@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::io;
-use std::net::{Shutdown};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
@@ -77,7 +77,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                 for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
                                     let test = udp::receiver::UdpReceiver::new(
                                         test_definition.clone(), &(i as u8),
-                                        ip_version, &0,
+                                        &ip_version, &0,
                                         &(payload["receiveBuffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
@@ -104,7 +104,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                 for (i, port) in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
                                     let test = udp::sender::UdpSender::new(
                                         test_definition.clone(), &(i as u8),
-                                        ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
+                                        &ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
                                         &(payload["sendBuffer"].as_i64().unwrap() as usize),
@@ -116,7 +116,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                 for (i, port) in payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
                                     let test = tcp::sender::TcpSender::new(
                                         test_definition.clone(), &(i as u8),
-                                        peer_addr.ip().to_string(), &(port.as_i64().unwrap() as u16),
+                                        &ip_version, peer_addr.ip().to_string(), &(port.as_i64().unwrap() as u16),
                                         &(payload["duration"].as_f64().unwrap() as f32),
                                         &(payload["sendInterval"].as_f64().unwrap() as f32),
                                         &(payload["sendBuffer"].as_i64().unwrap() as usize),
@@ -228,13 +228,13 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
     
     let mut listener:TcpListener;
     if ip_version == 4 {
-        listener = TcpListener::bind(&format!("0.0.0.0:{}", port).parse()?).expect(format!("failed to bind TCP socket, port {}", port).as_str());
+        listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     } else if ip_version == 6 {
-        listener = TcpListener::bind(&format!(":::{}", port).parse()?).expect(format!("failed to bind TCP socket, port {}", port).as_str());
+        listener = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     } else {
         return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
     }
-    log::info!("server listening on port {}", port);
+    log::info!("server listening on port {}, IPv{}", port, ip_version);
     
     let mio_token = Token(0);
     let poll = Poll::new()?;

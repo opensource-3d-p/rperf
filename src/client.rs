@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::net::{Shutdown};
+use std::net::{IpAddr, Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
@@ -14,8 +14,7 @@ use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
 use crate::protocol::messaging::{
     prepare_begin, prepare_end,
-    prepare_configuration_tcp_upload, prepare_configuration_tcp_download,
-    prepare_configuration_udp_upload, prepare_configuration_udp_download,
+    prepare_upload_configuration, prepare_download_configuration,
 };
 
 use crate::protocol::results::{IntervalResult, IntervalResultKind, TestResults, TcpTestResults, UdpTestResults};
@@ -30,78 +29,28 @@ static ALIVE:AtomicBool = AtomicBool::new(true);
 static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
 const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the server to respond
 
-fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
-    let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
-    let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
-    let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
-    let mut send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
-    let mut length:u32 = args.value_of("length").unwrap().parse()?;
-    
-    let mut send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
-    
-    if seconds <= 0.0 {
-        log::warn!("time was not in an acceptable range and has been set to 0.0");
-        seconds = 0.0
-    }
-    
-    if send_interval > 1.0 || send_interval <= 0.0 {
-        log::warn!("send-interval was not in an acceptable range and has been set to 0.05");
-        send_interval = 0.05
-    }
-    
-    if args.is_present("udp") {
-        log::debug!("preparing UDP upload config");
-        if length == 0 {
-            length = 1024;
-        }
-        if send_buffer < length {
-            log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to match", send_buffer);
-            send_buffer = length;
-        }
-        Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer))
+fn connect_to_server(ip_version:&u8, address:&str, port:&u16) -> BoxResult<TcpStream> {
+    let socket_addr:SocketAddr;
+    if *ip_version == 4 {
+        socket_addr = SocketAddr::new(IpAddr::V4(address.parse()?), *port);
+    } else if *ip_version == 6 {
+        socket_addr = SocketAddr::new(IpAddr::V6(address.parse()?), *port);
     } else {
-        log::debug!("preparing TCP upload config");
-        if length == 0 {
-            length = 128 * 1024;
-        }
-        if send_buffer < length {
-            log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to match", send_buffer);
-            send_buffer = length;
-        }
-        
-        let no_delay:bool = args.is_present("no_delay");
-        
-        Ok(prepare_configuration_tcp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer, no_delay))
+        return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
     }
-}
-fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
-    let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
-    let mut length:u32 = args.value_of("length").unwrap().parse()?;
-    let mut receive_buffer:u32 = args.value_of("receive_buffer").unwrap().parse()?;
+    log::info!("connecting to server at {}:{}...", address, port);
+    let stream = match TcpStream::connect(&socket_addr) {
+        Ok(s) => s,
+        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
+    };
+    log::info!("connected to server");
     
-    if args.is_present("udp") {
-        log::debug!("preparing UDP download config");
-        if length == 0 {
-            length = 1024;
-        }
-        if receive_buffer < length {
-            log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to match", receive_buffer);
-            receive_buffer = length;
-        }
-        Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16, receive_buffer))
-    } else {
-        log::debug!("preparing TCP download config");
-        if length == 0 {
-            length = 128 * 1024;
-        }
-        if receive_buffer < length {
-            log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to match", receive_buffer);
-            receive_buffer = length;
-        }
-        Ok(prepare_configuration_tcp_download(test_id, parallel_streams, length as u16, receive_buffer))
-    }
+    stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
+    stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+    
+    Ok(stream)
 }
-            
+
 
 pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut complete = false;
@@ -136,24 +85,14 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     } else {
         ip_version = 4;
     }
-    let port:u16 = args.value_of("port").unwrap().parse()?;
+    
     let server_address = args.value_of("client").unwrap();
+    let mut stream = connect_to_server(&ip_version, &server_address, &(args.value_of("port").unwrap().parse()?))?;
+    
     
     let test_id = uuid::Uuid::new_v4();
-    
-    let mut upload_config = prepare_upload_config(&args, test_id.as_bytes())?;
-    let download_config = prepare_download_config(&args, test_id.as_bytes())?;
-    
-    
-    log::info!("connecting to server at {}:{}...", server_address, port);
-    let mut stream = match TcpStream::connect(&format!("{}:{}", server_address, port).parse()?) {
-        Ok(s) => s,
-        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
-    };
-    log::info!("connected to server");
-    
-    stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-    stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+    let mut upload_config = prepare_upload_configuration(&args, test_id.as_bytes())?;
+    let download_config = prepare_download_configuration(&args, test_id.as_bytes())?;
     
     let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
@@ -277,7 +216,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                         for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
                             let test = tcp::sender::TcpSender::new(
                                 test_definition.clone(), &(i as u8),
-                                server_address.to_string(), &(port.as_i64().unwrap() as u16),
+                                &ip_version, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
                                 &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
