@@ -18,7 +18,7 @@ const POLL_TIMEOUT:Duration = Duration::from_millis(50);
 pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> {
     let serialised_message = serde_json::to_vec(message)?;
     
-    log::debug!("sending message of length {} to {}...", serialised_message.len(), stream.peer_addr()?);
+    log::debug!("sending message of length {}, {:?}, to {}...", serialised_message.len(), message, stream.peer_addr()?);
     let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
     output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());

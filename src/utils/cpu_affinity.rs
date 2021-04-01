@@ -1,8 +1,6 @@
 extern crate core_affinity;
-extern crate log;
 
 use std::error::Error;
-
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub struct CpuAffinityManager {
@@ -12,6 +10,8 @@ pub struct CpuAffinityManager {
 impl CpuAffinityManager {
     pub fn new(cores:&str) -> BoxResult<CpuAffinityManager> {
         let core_ids = core_affinity::get_core_ids().unwrap_or_default();
+        log::debug!("enumerated CPU cores: {:?}", core_ids.iter().map(|c| c.id).collect::<Vec<usize>>());
+        
         let mut enabled_cores = Vec::new();
         for cid in cores.split(',') {
             let cid_usize:usize = cid.parse()?;
@@ -26,6 +26,7 @@ impl CpuAffinityManager {
                 log::warn!("unrecognised CPU core: {}", cid_usize);
             }
         }
+        log::debug!("selecting from CPU cores {:?}", enabled_cores);
         
         Ok(CpuAffinityManager{
             enabled_cores: enabled_cores,
@@ -36,7 +37,7 @@ impl CpuAffinityManager {
     pub fn set_affinity(&mut self) {
         if self.enabled_cores.len() > 0 {
             let core_id = self.enabled_cores[self.last_core_pointer];
-            log::info!("setting CPU affinity to {}", core_id.id);
+            log::debug!("setting CPU affinity to {}", core_id.id);
             core_affinity::set_for_current(core_id);
             //cycle to the next option in a round-robin order
             if self.last_core_pointer == self.enabled_cores.len() - 1 {
