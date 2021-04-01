@@ -54,7 +54,7 @@ gathered and made available for review.
 
 Architecturally, _rperf_ has clients establish a TCP connection to the server,
 after which the client sends details about the test to be performed and the
-server obliges, sending observation results to the client during the entire
+server obliges, reporting observation results to the client during the entire
 testing process.
 
 The client may request that multiple parallel streams be used for testing, which
