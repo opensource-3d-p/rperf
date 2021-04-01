@@ -1,14 +1,14 @@
-extern crate log;
-
 use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
+/// prepares a message used to tell the server to begin operations
 pub fn prepare_begin() -> serde_json::Value {
     serde_json::json!({
         "kind": "begin",
     })
 }
 
+/// prepares a message used to tell the client to connect its test-streams
 pub fn prepare_connect(stream_ports:&[u16]) -> serde_json::Value {
     serde_json::json!({
         "kind": "connect",
@@ -17,18 +17,24 @@ pub fn prepare_connect(stream_ports:&[u16]) -> serde_json::Value {
     })
 }
 
+/// prepares a message used to tell the client that the server has connected its test-streams
 pub fn prepare_connected() -> serde_json::Value {
     serde_json::json!({
         "kind": "connected",
     })
 }
 
+/// prepares a message used to tell the server that testing is finished
 pub fn prepare_end() -> serde_json::Value {
     serde_json::json!({
         "kind": "end",
     })
 }
 
+
+
+
+/// prepares a message used to describe the upload role of a TCP test
 fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, seconds:f32, length:u16, send_interval:f32, send_buffer:u32, no_delay:bool) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
@@ -49,6 +55,7 @@ fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64
     })
 }
 
+/// prepares a message used to describe the download role of a TCP test
 fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:u16, receive_buffer:u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
@@ -64,6 +71,7 @@ fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:u16,
     })
 }
 
+/// prepares a message used to describe the upload role of a UDP test
 fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, seconds:f32, length:u16, send_interval:f32, send_buffer:u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
@@ -83,6 +91,7 @@ fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64
     })
 }
 
+/// prepares a message used to describe the download role of a UDP test
 fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:u16, receive_buffer:u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
@@ -101,9 +110,7 @@ fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:u16,
 
 
 
-
-
-pub fn validate_streams(streams:u8) -> u8 {
+fn validate_streams(streams:u8) -> u8 {
     if streams > 0 {
         streams
     } else {
@@ -112,7 +119,7 @@ pub fn validate_streams(streams:u8) -> u8 {
     }
 }
 
-pub fn validate_bandwidth(bandwidth:u64) -> u64 {
+fn validate_bandwidth(bandwidth:u64) -> u64 {
     if bandwidth > 0 {
         bandwidth
     } else {
@@ -121,7 +128,7 @@ pub fn validate_bandwidth(bandwidth:u64) -> u64 {
     }
 }
 
-pub fn validate_send_interval(send_interval:f32) -> f32 {
+fn validate_send_interval(send_interval:f32) -> f32 {
     if send_interval > 0.0 {
         send_interval
     } else {
@@ -130,7 +137,7 @@ pub fn validate_send_interval(send_interval:f32) -> f32 {
     }
 }
 
-pub fn calculate_length_udp(length:u16) -> u16 {
+fn calculate_length_udp(length:u16) -> u16 {
     if length < crate::stream::udp::TEST_HEADER_SIZE { //length must be at least enough to hold the test data
         crate::stream::udp::TEST_HEADER_SIZE
     } else {
@@ -140,8 +147,7 @@ pub fn calculate_length_udp(length:u16) -> u16 {
 
 
 
-
-
+/// prepares a message used to describe the upload role in a test
 pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
@@ -186,6 +192,7 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
         Ok(prepare_configuration_tcp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer, no_delay))
     }
 }
+/// prepares a message used to describe the download role in a test
 pub fn prepare_download_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
