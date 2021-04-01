@@ -92,7 +92,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     let test_id = uuid::Uuid::new_v4();
     let mut upload_config = prepare_upload_configuration(&args, test_id.as_bytes())?;
-    let download_config = prepare_download_configuration(&args, test_id.as_bytes())?;
+    let mut download_config = prepare_download_configuration(&args, test_id.as_bytes())?;
     
     let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
@@ -373,11 +373,39 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         }
     }
     
+    let common_config:serde_json::Value;
+    //sanitise the config structures for export
+    {
+        let upload_config_map = upload_config.as_object_mut().unwrap();
+        let cc_family = upload_config_map.remove("family");
+        upload_config_map.remove("kind");
+        let cc_length = upload_config_map.remove("length");
+        upload_config_map.remove("role");
+        upload_config_map.remove("testId");
+        upload_config_map.remove("streamPorts");
+        
+        let download_config_map = download_config.as_object_mut().unwrap();
+        download_config_map.remove("family");
+        download_config_map.remove("kind");
+        download_config_map.remove("length");
+        download_config_map.remove("role");
+        download_config_map.remove("testId");
+        
+        common_config = serde_json::json!({
+            "family": cc_family,
+            "length": cc_length,
+        });
+    }
+    
     let omit_seconds:usize = args.value_of("omit").unwrap().parse()?;
     {
         let tr = test_results.lock().unwrap();
         if display_json {
-            println!("{}", tr.to_json_string(omit_seconds));
+            println!("{}", tr.to_json_string(omit_seconds, upload_config, download_config, common_config, serde_json::json!({
+                "omit_seconds": omit_seconds,
+                "ip_version": ip_version,
+                "reverse": args.is_present("reverse"),
+            })));
         } else {
             println!("{}", tr.to_string(display_bit, omit_seconds));
         }

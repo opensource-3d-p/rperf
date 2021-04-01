@@ -614,11 +614,11 @@ pub trait TestResults {
     
     fn update_from_json(&mut self, value:serde_json::Value) -> BoxResult<()>;
     
-    fn to_json(&self, omit_seconds:usize) -> serde_json::Value;
+    fn to_json(&self, omit_seconds:usize, upload_config:serde_json::Value, download_config:serde_json::Value, common_config:serde_json::Value, additional_config:serde_json::Value) -> serde_json::Value;
     
     //produces a pretty-printed JSON string with the test results
-    fn to_json_string(&self, omit_seconds:usize) -> String {
-        serde_json::to_string_pretty(&self.to_json(omit_seconds)).unwrap()
+    fn to_json_string(&self, omit_seconds:usize, upload_config:serde_json::Value, download_config:serde_json::Value, common_config:serde_json::Value, additional_config:serde_json::Value) -> String {
+        serde_json::to_string_pretty(&self.to_json(omit_seconds, upload_config, download_config, common_config, additional_config)).unwrap()
     }
     
     //produces test-results in tabular form
@@ -698,7 +698,7 @@ impl TestResults for TcpTestResults {
         }
     }
     
-    fn to_json(&self, omit_seconds:usize) -> serde_json::Value {
+    fn to_json(&self, omit_seconds:usize, upload_config:serde_json::Value, download_config:serde_json::Value, common_config:serde_json::Value, additional_config:serde_json::Value) -> serde_json::Value {
         let mut duration_send:f64 = 0.0;
         let mut bytes_sent:u64 = 0;
         
@@ -742,6 +742,12 @@ impl TestResults for TcpTestResults {
         });
         
         serde_json::json!({
+            "config": {
+                "upload": upload_config,
+                "download": download_config,
+                "common": common_config,
+                "additional": additional_config,
+            },
             "streams": streams,
             "summary": summary,
             "success": self.is_success(),
@@ -893,7 +899,7 @@ impl TestResults for UdpTestResults {
         }
     }
     
-    fn to_json(&self, omit_seconds:usize) -> serde_json::Value {
+    fn to_json(&self, omit_seconds:usize, upload_config:serde_json::Value, download_config:serde_json::Value, common_config:serde_json::Value, additional_config:serde_json::Value) -> serde_json::Value {
         let mut duration_send:f64 = 0.0;
         
         let mut bytes_sent:u64 = 0;
@@ -976,6 +982,12 @@ impl TestResults for UdpTestResults {
         }
         
         serde_json::json!({
+            "config": {
+                "upload": upload_config,
+                "download": download_config,
+                "common": common_config,
+                "additional": additional_config,
+            },
             "streams": streams,
             "summary": summary,
             "success": self.is_success(),

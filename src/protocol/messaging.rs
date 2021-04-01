@@ -35,7 +35,7 @@ pub fn prepare_end() -> serde_json::Value {
 
 
 /// prepares a message used to describe the upload role of a TCP test
-fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, seconds:f32, length:u16, send_interval:f32, send_buffer:u32, no_delay:bool) -> serde_json::Value {
+fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64, seconds:f32, length:usize, send_interval:f32, send_buffer:u32, no_delay:bool) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
         
@@ -47,7 +47,7 @@ fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64
         
         "bandwidth": validate_bandwidth(bandwidth),
         "duration": seconds,
-        "length": calculate_length_udp(length),
+        "length": calculate_length_tcp(length),
         "sendInterval": validate_send_interval(send_interval),
         
         "sendBuffer": send_buffer,
@@ -56,7 +56,7 @@ fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64
 }
 
 /// prepares a message used to describe the download role of a TCP test
-fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:u16, receive_buffer:u32) -> serde_json::Value {
+fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:usize, receive_buffer:u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
         
@@ -66,7 +66,7 @@ fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:u16,
         "testId": test_id,
         "streams": validate_streams(streams),
         
-        "length": calculate_length_udp(length),
+        "length": calculate_length_tcp(length),
         "receiveBuffer": receive_buffer,
     })
 }
@@ -137,6 +137,13 @@ fn validate_send_interval(send_interval:f32) -> f32 {
     }
 }
 
+fn calculate_length_tcp(length:usize) -> usize {
+    if length < crate::stream::tcp::TEST_HEADER_SIZE { //length must be at least enough to hold the test data
+        crate::stream::tcp::TEST_HEADER_SIZE
+    } else {
+        length
+    }
+}
 fn calculate_length_udp(length:u16) -> u16 {
     if length < crate::stream::udp::TEST_HEADER_SIZE { //length must be at least enough to hold the test data
         crate::stream::udp::TEST_HEADER_SIZE
@@ -144,7 +151,6 @@ fn calculate_length_udp(length:u16) -> u16 {
         length
     }
 }
-
 
 
 /// prepares a message used to describe the upload role in a test
@@ -189,7 +195,7 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
         
         let no_delay:bool = args.is_present("no_delay");
         
-        Ok(prepare_configuration_tcp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer, no_delay))
+        Ok(prepare_configuration_tcp_upload(test_id, parallel_streams, bandwidth, seconds, length as usize, send_interval, send_buffer, no_delay))
     }
 }
 /// prepares a message used to describe the download role in a test
@@ -215,8 +221,8 @@ pub fn prepare_download_configuration(args:&clap::ArgMatches, test_id:&[u8; 16])
         }
         if receive_buffer < length {
             log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to {}", receive_buffer, length * 2);
-            receive_buffer = length;
+            receive_buffer = length * 2;
         }
-        Ok(prepare_configuration_tcp_download(test_id, parallel_streams, length as u16, receive_buffer))
+        Ok(prepare_configuration_tcp_download(test_id, parallel_streams, length as usize, receive_buffer))
     }
 }
