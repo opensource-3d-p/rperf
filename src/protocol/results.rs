@@ -1,11 +1,14 @@
-extern crate log;
-
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 
 use serde::{Serialize, Deserialize};
 
+use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
+
+/* This module contains structures used to represent and collect the results of tests.
+ * Since everything is basically just a data-container with representation methods,
+ * it isn't extensively documented.
+ */
 
 
 #[derive(PartialEq)]

@@ -18,7 +18,7 @@ const POLL_TIMEOUT:Duration = Duration::from_millis(50);
 pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> {
     let serialised_message = serde_json::to_vec(message)?;
     
-    log::debug!("sending message of length {} to {}", serialised_message.len(), stream.peer_addr()?);
+    log::debug!("sending message of length {} to {}...", serialised_message.len(), stream.peer_addr()?);
     let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
     output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());
@@ -141,8 +141,8 @@ fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, results_hand
 }
 /// handles the full process of retrieving a message from a client-server communications stream
 pub fn receive(mut stream:&mut TcpStream, alive_check:fn() -> bool, results_handler:&mut dyn FnMut() -> BoxResult<()>) -> BoxResult<serde_json::Value> {
-    log::debug!("awaiting length-value from {}", stream.peer_addr()?);
+    log::debug!("awaiting length-value from {}...", stream.peer_addr()?);
     let length = receive_length(&mut stream, alive_check, results_handler)?;
-    log::debug!("awaiting payload from {}", stream.peer_addr()?);
+    log::debug!("awaiting payload from {}...", stream.peer_addr()?);
     receive_payload(&mut stream, alive_check, results_handler, length)
 }

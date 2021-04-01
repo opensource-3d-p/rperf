@@ -4,15 +4,17 @@ extern crate nix;
 use std::error::Error;
 use std::time::{Duration};
 
-use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
+
+use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
+
+use super::{INTERVAL, TestStream};
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE:u16 = 36;
 
 const POLL_TIMEOUT:Duration = Duration::from_millis(250);
-const UPDATE_INTERVAL:Duration = Duration::from_secs(1);
 const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
@@ -87,6 +89,7 @@ pub mod receiver {
     }
     impl UdpReceiver {
         pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receive_buffer:&usize) -> super::BoxResult<UdpReceiver> {
+            log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket:UdpSocket;
             let framing_size:u16;
             if *ip_version == 4 {
@@ -104,6 +107,7 @@ pub mod receiver {
                     super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
                 }
             }
+            log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
             
             let mio_poll_token = Token(0);
             let mio_poll = Poll::new()?;
@@ -166,10 +170,10 @@ pub mod receiver {
         }
         
         fn process_jitter(&mut self, timestamp:&NaiveDateTime) {
-            //this is a pretty straightforward implementation of RFC 1889, Appendix 8
-            //it works on an assumption that the timestamp delta between sender and receiver
-            //will remain effectively constant during the testing window
-            
+            /* this is a pretty straightforward implementation of RFC 1889, Appendix 8
+             * it works on an assumption that the timestamp delta between sender and receiver
+             * will remain effectively constant during the testing window
+             */
             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
             let current_timestamp = NaiveDateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos());
             
@@ -225,7 +229,7 @@ pub mod receiver {
             return true;
         }
     }
-    impl crate::stream::TestStream for UdpReceiver {
+    impl super::TestStream for UdpReceiver {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = vec![0_u8; self.test_definition.length.into()];
@@ -243,6 +247,7 @@ pub mod receiver {
                     return Some(Err(Box::new(simple_error::simple_error!("UDP reception for stream {} timed out, likely because the end-signal was lost", self.stream_idx))));
                 }
                 
+                log::trace!("awaiting UDP packet on stream {}...", self.stream_idx);
                 let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
                 if poll_result.is_err() {
                     return Some(Err(Box::new(poll_result.unwrap_err())));
@@ -250,8 +255,9 @@ pub mod receiver {
                 for event in events.iter() {
                     if event.token() == self.mio_poll_token {
                         loop {
-                            match self.socket.recv(&mut buf) {
-                                Ok(packet_size) => {
+                            match self.socket.recv_from(&mut buf) {
+                                Ok((packet_size, peer_addr)) => {
+                                    log::trace!("received {} bytes in UDP packet {} from {}", packet_size, self.stream_idx, peer_addr);
                                     if packet_size == 16 { //possible end-of-test message
                                         if &buf[0..16] == self.test_definition.test_id { //test's over
                                             self.stop();
@@ -259,7 +265,7 @@ pub mod receiver {
                                         }
                                     }
                                     if packet_size < super::TEST_HEADER_SIZE as usize {
-                                        log::error!("received malformed packet with size {}", packet_size);
+                                        log::warn!("received malformed packet with size {} for UDP stream {} from {}", packet_size, self.stream_idx, peer_addr);
                                         continue
                                     }
                                     
@@ -267,7 +273,7 @@ pub mod receiver {
                                         bytes_received += packet_size as u64 + self.framing_size as u64;
                                         
                                         let elapsed_time = start.elapsed();
-                                        if elapsed_time >= super::UPDATE_INTERVAL {
+                                        if elapsed_time >= super::INTERVAL {
                                             return Some(Ok(Box::new(super::UdpReceiveResult{
                                                 stream_idx: self.stream_idx,
                                                 
@@ -284,7 +290,7 @@ pub mod receiver {
                                             })))
                                         }
                                     } else {
-                                        log::error!("received packet unrelated to the current test");
+                                        log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
                                         continue
                                     }
                                 },
@@ -366,6 +372,8 @@ pub mod sender {
     }
     impl UdpSender {
         pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize) -> super::BoxResult<UdpSender> {
+            log::debug!("preparing to connect UDP stream {}...", stream_idx);
+            
             let socket:UdpSocket;
             let socket_addr_server:SocketAddr;
             let framing_size:u16;
@@ -386,7 +394,8 @@ pub mod sender {
                     super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
                 }
             }
-            socket.connect(socket_addr_server).expect("failed to connect socket");
+            socket.connect(socket_addr_server)?;
+            log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_server);
             
             let mut staged_packet = vec![0_u8; test_definition.length.into()];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) { //fill the packet with a fixed sequence
@@ -426,10 +435,10 @@ pub mod sender {
             self.next_packet_id += 1;
         }
     }
-    impl crate::stream::TestStream for UdpSender {
+    impl super::TestStream for UdpSender {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
-            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::UPDATE_INTERVAL.as_secs_f32()) as i64;
+            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
             let mut bytes_to_send_remaining = bytes_to_send;
             let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
@@ -440,11 +449,14 @@ pub mod sender {
             let cycle_start = Instant::now();
             
             while self.active && self.remaining_duration > 0.0 {
+                log::trace!("writing {} bytes in UDP stream {}...", self.staged_packet.len(), self.stream_idx);
                 let packet_start = Instant::now();
                 
                 self.prepare_packet();
                 match self.socket.send(&self.staged_packet) {
                     Ok(packet_size) => {
+                        log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);
+                        
                         packets_sent += 1;
                         
                         let bytes_written = (packet_size + (self.framing_size as usize)) as i64;
@@ -453,7 +465,7 @@ pub mod sender {
                         bytes_to_send_per_interval_slice_remaining -= bytes_written;
                         
                         let elapsed_time = cycle_start.elapsed();
-                        if elapsed_time >= super::UPDATE_INTERVAL {
+                        if elapsed_time >= super::INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
                             return Some(Ok(Box::new(super::UdpSendResult{
@@ -473,8 +485,8 @@ pub mod sender {
                 
                 if bytes_to_send_remaining <= 0 { //interval's target is exhausted
                     let elapsed_time = cycle_start.elapsed();
-                    if super::UPDATE_INTERVAL > elapsed_time {
-                        sleep(super::UPDATE_INTERVAL - elapsed_time);
+                    if super::INTERVAL > elapsed_time {
+                        sleep(super::INTERVAL - elapsed_time);
                     }
                 } else if bytes_to_send_per_interval_slice_remaining <= 0 { // interval subsection exhausted
                     bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;

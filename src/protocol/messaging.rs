@@ -174,21 +174,21 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
     }
     
     if args.is_present("udp") {
-        log::debug!("preparing UDP upload config");
+        log::debug!("preparing UDP upload config...");
         if length == 0 {
             length = 1024;
         }
-        if send_buffer < length {
+        if send_buffer != 0 && send_buffer < length {
             log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to {}", send_buffer, length * 2);
-            send_buffer = length;
+            send_buffer = length * 2;
         }
         Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer))
     } else {
-        log::debug!("preparing TCP upload config");
+        log::debug!("preparing TCP upload config...");
         if length == 0 {
             length = 128 * 1024;
         }
-        if send_buffer < length {
+        if send_buffer != 0 && send_buffer < length {
             log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to {}", send_buffer, length * 2);
             send_buffer = length * 2;
         }
@@ -205,21 +205,21 @@ pub fn prepare_download_configuration(args:&clap::ArgMatches, test_id:&[u8; 16])
     let mut receive_buffer:u32 = args.value_of("receive_buffer").unwrap().parse()?;
     
     if args.is_present("udp") {
-        log::debug!("preparing UDP download config");
+        log::debug!("preparing UDP download config...");
         if length == 0 {
             length = 1024;
         }
-        if receive_buffer < length {
+        if receive_buffer != 0 && receive_buffer < length {
             log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to {}", receive_buffer, length * 2);
             receive_buffer = length * 2;
         }
         Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16, receive_buffer))
     } else {
-        log::debug!("preparing TCP download config");
+        log::debug!("preparing TCP download config...");
         if length == 0 {
             length = 128 * 1024;
         }
-        if receive_buffer < length {
+        if receive_buffer != 0 && receive_buffer < length {
             log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to {}", receive_buffer, length * 2);
             receive_buffer = length * 2;
         }
