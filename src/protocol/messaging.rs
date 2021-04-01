@@ -31,7 +31,7 @@ pub fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth
     serde_json::json!({
         "kind": "configuration",
         
-        "family": "udp",
+        "family": "tcp",
         "role": "upload",
         
         "testId": test_id,
@@ -51,7 +51,7 @@ pub fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:
     serde_json::json!({
         "kind": "configuration",
         
-        "family": "udp",
+        "family": "tcp",
         "role": "download",
         
         "testId": test_id,
