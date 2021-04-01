@@ -17,7 +17,7 @@ use mio::{Events, Ready, Poll, PollOpt, Token};
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
 use crate::protocol::messaging::{
-    prepare_connect, prepare_connected,
+    prepare_connect, prepare_connect_ready,
 };
 
 use crate::stream::TestStream;
@@ -28,9 +28,11 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 const POLL_TIMEOUT:Duration = Duration::from_millis(500);
 
+/// when false, the system is shutting down
 static ALIVE:AtomicBool = AtomicBool::new(true);
 
 lazy_static::lazy_static!{
+    /// a means of keeping track of which clients are running tests
     static ref CLIENTS:CHashMap<String, bool> = {
         let hm = CHashMap::new();
         hm
@@ -39,19 +41,20 @@ lazy_static::lazy_static!{
 
 
 fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
-    let peer_addr = stream.peer_addr()?;
     let mut started = false;
+    let peer_addr = stream.peer_addr()?;
     
+    
+    //scaffolding to track and relay the streams and stream-results associated with this client
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
-    
-    
     let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>) = channel();
     
+    //a closure used to pass results from stream-handlers to the client-communication stream
     let mut forwarding_send_stream = stream.try_clone()?;
     let mut results_handler = || -> BoxResult<()> {
-        loop {
-            match results_rx.try_recv() {
+        loop { //drain all results every time this closer is invoked
+            match results_rx.try_recv() { //if there's something to forward, write it to the client
                 Ok(result) => {
                     send(&mut forwarding_send_stream, &result.to_json())?;
                 },
@@ -62,6 +65,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
     };
     
     
+    //server operations are entirely driven by client-signalling, making this a (simple) state-machine
     while is_alive() {
         let payload = receive(stream, is_alive, &mut results_handler)?;
         match payload.get("kind") {
@@ -69,14 +73,20 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                 match kind.as_str().unwrap() {
                     "configuration" => { //we either need to connect streams to the client or prepare to receive connections
                         if payload.get("role").unwrap_or(&serde_json::json!("download")).as_str().unwrap() == "download" {
-                            log::debug!("running in forward-mode: server will be receiving data");
+                            log::debug!("[{}] running in forward-mode: server will be receiving data", &peer_addr);
                             
-                            let mut stream_ports = Vec::new();
+                            let stream_count = payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap();
+                            //since we're receiving data, we're also responsible for letting the client know where to send it
+                            let mut stream_ports = Vec::with_capacity(stream_count as usize);
+                            
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
+                                log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_count);
+                                
                                 let test_definition = udp::UdpTestDefinition::new(&payload)?;
-                                for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
+                                for stream_idx in 0..stream_count {
+                                    log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
                                     let test = udp::receiver::UdpReceiver::new(
-                                        test_definition.clone(), &(i as u8),
+                                        test_definition.clone(), &(stream_idx as u8),
                                         &ip_version, &0,
                                         &(payload["receiveBuffer"].as_i64().unwrap() as usize),
                                     )?;
@@ -84,10 +94,13 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             } else { //TCP
+                                log::info!("[{}] preparing for TCP test with {} streams...", &peer_addr, stream_count);
+                                
                                 let test_definition = tcp::TcpTestDefinition::new(&payload)?;
-                                for i in 0..(payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap()) {
+                                for stream_idx in 0..stream_count {
+                                    log::debug!("[{}] preparing TCP-receiver for stream {}...", &peer_addr, stream_idx);
                                     let test = tcp::receiver::TcpReceiver::new(
-                                        test_definition.clone(), &(i as u8),
+                                        test_definition.clone(), &(stream_idx as u8),
                                         &ip_version, &0,
                                         &(payload["receiveBuffer"].as_i64().unwrap() as usize),
                                     )?;
@@ -95,15 +108,22 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             }
+                            
+                            //let the client know we're ready to receive the connection; stream-ports are in stream-index order
                             send(stream, &prepare_connect(&stream_ports))?;
                         } else { //upload
-                            log::debug!("running in reverse-mode: server will be uploading data");
+                            log::debug!("[{}] running in reverse-mode: server will be uploading data", &peer_addr);
+                            
+                            let stream_ports = payload.get("streamPorts").unwrap().as_array().unwrap();
                             
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
+                                log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_ports.len());
+                                
                                 let test_definition = udp::UdpTestDefinition::new(&payload)?;
-                                for (i, port) in payload.get("streamPorts").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
+                                for (stream_idx, port) in stream_ports.iter().enumerate() {
+                                    log::debug!("[{}] preparing UDP-sender for stream {}...", &peer_addr, stream_idx);
                                     let test = udp::sender::UdpSender::new(
-                                        test_definition.clone(), &(i as u8),
+                                        test_definition.clone(), &(stream_idx as u8),
                                         &ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
@@ -112,10 +132,13 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             } else { //TCP
+                                log::info!("[{}] preparing for TCP test with {} streams...", &peer_addr, stream_ports.len());
+                                
                                 let test_definition = tcp::TcpTestDefinition::new(&payload)?;
-                                for (i, port) in payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                                for (stream_idx, port) in stream_ports.iter().enumerate() {
+                                    log::debug!("[{}] preparing TCP-sender for stream {}...", &peer_addr, stream_idx);
                                     let test = tcp::sender::TcpSender::new(
-                                        test_definition.clone(), &(i as u8),
+                                        test_definition.clone(), &(stream_idx as u8),
                                         &ip_version, peer_addr.ip().to_string(), &(port.as_i64().unwrap() as u16),
                                         &(payload["duration"].as_f64().unwrap() as f32),
                                         &(payload["sendInterval"].as_f64().unwrap() as f32),
@@ -125,12 +148,15 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
                             }
-                            send(stream, &prepare_connected())?;
+                            
+                            //let the client know we're ready to begin
+                            send(stream, &prepare_connect_ready())?;
                         }
                     },
-                    "begin" => {
-                        if !started {
-                            for parallel_stream in parallel_streams.iter_mut() {
+                    "begin" => { //the client has indicated that testing can begin
+                        if !started { //a simple guard to protect against reinitialisaion
+                            for (stream_idx, parallel_stream) in parallel_streams.iter_mut().enumerate() {
+                                log::info!("[{}] beginning execution of stream {}...", &peer_addr, stream_idx);
                                 let c_ps = Arc::clone(&parallel_stream);
                                 let c_results_tx = results_tx.clone();
                                 let c_cam = cpu_affinity_manager.clone();
@@ -140,21 +166,21 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     }
                                     loop {
                                         let mut test = c_ps.lock().unwrap();
-                                        log::debug!("beginning test-interval for stream {}", test.get_idx());
+                                        log::debug!("[{}] beginning test-interval for stream {}", &peer_addr, test.get_idx());
                                         match test.run_interval() {
                                             Some(interval_result) => match interval_result {
                                                 Ok(ir) => match c_results_tx.send(ir) {
                                                     Ok(_) => (),
                                                     Err(e) => {
-                                                        log::error!("unable to process interval-result: {}", e);
+                                                        log::error!("[{}] unable to process interval-result: {}", &peer_addr, e);
                                                         break
                                                     },
                                                 },
                                                 Err(e) => {
-                                                    log::error!("unable to process stream: {}", e);
+                                                    log::error!("[{}] unable to process stream: {}", peer_addr, e);
                                                     match c_results_tx.send(Box::new(crate::protocol::results::ServerFailedResult{stream_idx: test.get_idx()})) {
                                                         Ok(_) => (),
-                                                        Err(e) => log::error!("unable to report interval-failed-result: {}", e),
+                                                        Err(e) => log::error!("[{}] unable to report interval-failed-result: {}", &peer_addr, e),
                                                     }
                                                     break;
                                                 },
@@ -162,7 +188,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                             None => {
                                                 match c_results_tx.send(Box::new(crate::protocol::results::ServerDoneResult{stream_idx: test.get_idx()})) {
                                                     Ok(_) => (),
-                                                    Err(e) => log::error!("unable to report interval-done-result: {}", e),
+                                                    Err(e) => log::error!("[{}] unable to report interval-done-result: {}", &peer_addr, e),
                                                 }
                                                 break;
                                             },
@@ -172,43 +198,44 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                 parallel_streams_joinhandles.push(handle);
                             }
                             started = true;
-                        } else {
-                            log::error!("duplicate begin-signal from {}", stream.peer_addr()?);
+                        } else { //this can only happen in case of malicious action
+                            log::error!("[{}] duplicate begin-signal", &peer_addr);
                             break;
                         }
                     },
-                    "end" => {
-                        log::info!("end-signal from {}", stream.peer_addr()?);
+                    "end" => { //the client has indicated that testing is done; stop cleanly
+                        log::info!("[{}] end of testing signaled", &peer_addr);
                         break;
                     },
                     _ => {
-                        log::error!("invalid data from {}", stream.peer_addr()?);
+                        log::error!("[{}] invalid data", &peer_addr);
                         break;
                     },
                 }
             },
             None => {
-                log::error!("invalid data from {}", stream.peer_addr()?);
+                log::error!("[{}] invalid data", &peer_addr);
                 break;
             },
         }
     }
     
-    //ensure everything has ended
+    log::debug!("[{}] stopping any still-in-progress streams", &peer_addr);
     for ps in parallel_streams.iter_mut() {
         let mut stream = match (*ps).lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                log::error!("a stream-handler was poisoned; this indicates some sort of logic error");
+                log::error!("[{}] a stream-handler was poisoned; this indicates some sort of logic error", &peer_addr);
                 poisoned.into_inner()
             },
         };
         stream.stop();
     }
+    log::debug!("[{}] waiting for all streams to end", &peer_addr);
     for jh in parallel_streams_joinhandles {
         match jh.join() {
             Ok(_) => (),
-            Err(e) => log::error!("error in parallel stream: {:?}", e),
+            Err(e) => log::error!("[{}] error in parallel stream: {:?}", &peer_addr, e),
         }
     }
     
@@ -216,6 +243,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
 }
 
 pub fn serve(args:ArgMatches) -> BoxResult<()> {
+    //config-parsing and pre-connection setup
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let ip_version:u8;
@@ -226,6 +254,8 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
     }
     let port:u16 = args.value_of("port").unwrap().parse()?;
     
+    
+    //start listening for connections
     let mut listener:TcpListener;
     if ip_version == 4 {
         listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());

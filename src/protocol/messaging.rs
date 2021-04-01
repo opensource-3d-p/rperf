@@ -17,10 +17,10 @@ pub fn prepare_connect(stream_ports:&[u16]) -> serde_json::Value {
     })
 }
 
-/// prepares a message used to tell the client that the server has connected its test-streams
-pub fn prepare_connected() -> serde_json::Value {
+/// prepares a message used to tell the client that the server is ready to connect to its test-streams
+pub fn prepare_connect_ready() -> serde_json::Value {
     serde_json::json!({
-        "kind": "connected",
+        "kind": "connect-ready",
     })
 }
 

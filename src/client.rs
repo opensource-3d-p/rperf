@@ -25,7 +25,9 @@ use crate::stream::udp;
 
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
+/// when false, the system is shutting down
 static ALIVE:AtomicBool = AtomicBool::new(true);
+/// a deferred kill-switch to handle shutdowns a bit more gracefully in the event of a probable disconnect
 static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
 const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the server to respond
 
@@ -51,10 +53,27 @@ fn connect_to_server(ip_version:&u8, address:&str, port:&u16) -> BoxResult<TcpSt
     Ok(stream)
 }
 
+fn prepare_test_results(is_udp:bool, stream_count:u8) -> Mutex<Box<dyn TestResults>> {
+    if is_udp { //UDP
+        let mut udp_test_results = UdpTestResults::new();
+        for i in 0..stream_count {
+            udp_test_results.prepare_index(&i);
+        }
+        Mutex::new(Box::new(udp_test_results))
+    } else { //TCP
+        let mut tcp_test_results = TcpTestResults::new();
+        for i in 0..stream_count {
+            tcp_test_results.prepare_index(&i);
+        }
+        Mutex::new(Box::new(tcp_test_results))
+    }
+}
+
 
 pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut complete = false;
     
+    //config-parsing and pre-connection setup
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let display_json:bool;
@@ -79,6 +98,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         },
     }
     
+    let is_udp = args.is_present("udp");
+    
     let ip_version:u8;
     if args.is_present("version6") {
         ip_version = 6;
@@ -86,43 +107,34 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         ip_version = 4;
     }
     
-    let server_address = args.value_of("client").unwrap();
-    let mut stream = connect_to_server(&ip_version, &server_address, &(args.value_of("port").unwrap().parse()?))?;
-    
-    
     let test_id = uuid::Uuid::new_v4();
     let mut upload_config = prepare_upload_configuration(&args, test_id.as_bytes())?;
     let mut download_config = prepare_download_configuration(&args, test_id.as_bytes())?;
     
+    
+    //connect to the server
+    let server_address = args.value_of("client").unwrap();
+    let mut stream = connect_to_server(&ip_version, &server_address, &(args.value_of("port").unwrap().parse()?))?;
+    
+    
+    //scaffolding to track and relay the streams and stream-results associated with this test
     let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
     let mut parallel_streams:Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
-    
-    let test_results:Mutex<Box<dyn TestResults>>;
-    if args.is_present("udp") {
-        let mut udp_test_results = UdpTestResults::new();
-        for i in 0..stream_count {
-            udp_test_results.prepare_index(&(i as u8));
-        }
-        test_results = Mutex::new(Box::new(udp_test_results));
-    } else { //TCP
-        let mut tcp_test_results = TcpTestResults::new();
-        for i in 0..stream_count {
-            tcp_test_results.prepare_index(&(i as u8));
-        }
-        test_results = Mutex::new(Box::new(tcp_test_results));
-    }
-    
     let (results_tx, results_rx):(std::sync::mpsc::Sender<Box<dyn IntervalResult + Sync + Send>>, std::sync::mpsc::Receiver<Box<dyn IntervalResult + Sync + Send>>) = channel();
     
+    let test_results:Mutex<Box<dyn TestResults>> = prepare_test_results(is_udp, stream_count as u8);
+    
+    //a closure used to pass results from stream-handlers to the test-result structure
     let mut results_handler = || -> BoxResult<()> {
-        loop {
-            match results_rx.try_recv() {
+        loop { //drain all results every time this closer is invoked
+            match results_rx.try_recv() { //see if there's a result to pass on
                 Ok(result) => {
-                    if !display_json {
+                    if !display_json { //since this runs in the main thread, which isn't involved in any testing, render things immediately
                         println!("{}", result.to_string(display_bit));
                     }
                     
+                    //update the test-results accordingly
                     let mut tr = test_results.lock().unwrap();
                     match result.kind() {
                         IntervalResultKind::ClientDone | IntervalResultKind::ClientFailed => {
@@ -154,17 +166,21 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         Ok(())
     };
     
-    
+    //depending on whether this is a forward- or reverse-test, the order of configuring test-streams will differ
     if args.is_present("reverse") {
         log::debug!("running in reverse-mode: server will be uploading data");
         
-        let mut stream_ports = Vec::new();
+        //when we're receiving data, we're also responsible for letting the server know where to send it
+        let mut stream_ports = Vec::with_capacity(stream_count);
         
-        if args.is_present("udp") {
+        if is_udp { //UDP
+            log::info!("preparing for reverse-UDP test with {} streams...", stream_count);
+            
             let test_definition = udp::UdpTestDefinition::new(&download_config)?;
-            for i in 0..stream_count {
+            for stream_idx in 0..stream_count {
+                log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
-                    test_definition.clone(), &(i as u8),
+                    test_definition.clone(), &(stream_idx as u8),
                     &ip_version, &0,
                     &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
                 )?;
@@ -172,10 +188,13 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
         } else { //TCP
+            log::info!("preparing for reverse-TCP test with {} streams...", stream_count);
+            
             let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
-            for i in 0..stream_count {
+            for stream_idx in 0..stream_count {
+                log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
                 let test = tcp::receiver::TcpReceiver::new(
-                    test_definition.clone(), &(i as u8),
+                    test_definition.clone(), &(stream_idx as u8),
                     &ip_version, &0,
                     &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
                 )?;
@@ -184,26 +203,34 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
             }        
         }
         
+        //add the port-list to the upload-config that the server will receive; this is in stream-index order
         upload_config["streamPorts"] = serde_json::json!(stream_ports);
         
+        //let the server know what we're expecting
         send(&mut stream, &upload_config)?;
     } else {
         log::debug!("running in forward-mode: server will be receiving data");
         
+        //let the server know to prepare for us to connect
         send(&mut stream, &download_config)?;
         //NOTE: we don't prepare to send data at this point; that happens in the loop below, after the server signals that it's ready
     }
     
+    
+    //now that the server knows what we need to do, we have to wait for its response
     let connection_payload = receive(&mut stream, is_alive, &mut results_handler)?;
     match connection_payload.get("kind") {
         Some(kind) => {
             match kind.as_str().unwrap_or_default() {
                 "connect" => { //we need to connect to the server
-                    if args.is_present("udp") {
+                    if is_udp { //UDP
+                        log::info!("preparing for UDP test with {} streams...", stream_count);
+                        
                         let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
-                        for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                        for (stream_idx, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                            log::debug!("preparing UDP-sender for stream {}...", stream_idx);
                             let test = udp::sender::UdpSender::new(
-                                test_definition.clone(), &(i as u8),
+                                test_definition.clone(), &(stream_idx as u8),
                                 &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
@@ -212,10 +239,13 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
                     } else { //TCP
+                        log::info!("preparing for TCP test with {} streams...", stream_count);
+                        
                         let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
-                        for (i, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                        for (stream_idx, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                            log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                             let test = tcp::sender::TcpSender::new(
-                                test_definition.clone(), &(i as u8),
+                                test_definition.clone(), &(stream_idx as u8),
                                 &ip_version, server_address.to_string(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
@@ -226,7 +256,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                         }
                     }
                 },
-                "connected" => { //server has connected to us
+                "connect-ready" => { //server is ready to connect to us
                     //nothing more to do in this flow
                 },
                 _ => {
@@ -241,13 +271,16 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         },
     }
     
-    if is_alive() {
+    
+    if is_alive() { //if interrupted while waiting for the server to respond, there's no reason to continue
+        log::info!("informing server that testing can begin");
         //tell the server to start
         send(&mut stream, &prepare_begin())?;
         
         log::debug!("spawning stream-threads");
         //begin the test-streams
-        for parallel_stream in parallel_streams.iter_mut() {
+        for (stream_idx, parallel_stream) in parallel_streams.iter_mut().enumerate() {
+            log::info!("beginning execution of stream {}...", stream_idx);
             let c_ps = Arc::clone(&parallel_stream);
             let c_results_tx = results_tx.clone();
             let c_cam = cpu_affinity_manager.clone();
@@ -350,12 +383,12 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         }
     }
     
-    //assume this is a controlled shutdown
+    //assume this is a controlled shutdown; if it isn't, this is just a very slight waste of time
     send(&mut stream, &prepare_end()).unwrap_or_default();
-    thread::sleep(Duration::from_millis(500)); //wait a moment for the shutdown to finish cleanly
+    thread::sleep(Duration::from_millis(250)); //wait a moment for the "end" message to be queued for delivery to the server
     stream.shutdown(Shutdown::Both).unwrap_or_default();
     
-    //ensure everything has ended
+    log::debug!("stopping any still-in-progress streams");
     for ps in parallel_streams.iter_mut() {
         let mut stream = match (*ps).lock() {
             Ok(guard) => guard,
@@ -366,6 +399,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         };
         stream.stop();
     }
+    log::debug!("waiting for all streams to end");
     for jh in parallel_streams_joinhandles {
         match jh.join() {
             Ok(_) => (),
@@ -397,6 +431,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         });
     }
     
+    log::debug!("displaying test results");
     let omit_seconds:usize = args.value_of("omit").unwrap().parse()?;
     {
         let tr = test_results.lock().unwrap();
