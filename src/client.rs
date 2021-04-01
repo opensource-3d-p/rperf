@@ -37,7 +37,7 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
     let mut send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
     
-    let send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
+    let mut send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
     
     if seconds <= 0.0 {
         log::warn!("time was not in an acceptable range and has been set to 0.0");
@@ -54,11 +54,19 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
         if length == 0 {
             length = 1024;
         }
+        if send_buffer < length {
+            log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to match", send_buffer);
+            send_buffer = length;
+        }
         Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer))
     } else {
         log::debug!("preparing TCP upload config");
         if length == 0 {
             length = 128 * 1024;
+        }
+        if send_buffer < length {
+            log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to match", send_buffer);
+            send_buffer = length;
         }
         
         let no_delay:bool = args.is_present("no_delay");
@@ -69,18 +77,26 @@ fn prepare_upload_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde
 fn prepare_download_config(args:&ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
-    let receive_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
+    let mut receive_buffer:u32 = args.value_of("receive_buffer").unwrap().parse()?;
     
     if args.is_present("udp") {
         log::debug!("preparing UDP download config");
         if length == 0 {
             length = 1024;
         }
+        if receive_buffer < length {
+            log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to match", receive_buffer);
+            receive_buffer = length;
+        }
         Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16, receive_buffer))
     } else {
         log::debug!("preparing TCP download config");
         if length == 0 {
             length = 128 * 1024;
+        }
+        if receive_buffer < length {
+            log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to match", receive_buffer);
+            receive_buffer = length;
         }
         Ok(prepare_configuration_tcp_download(test_id, parallel_streams, length as u16, receive_buffer))
     }

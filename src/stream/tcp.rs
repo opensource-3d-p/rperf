@@ -334,9 +334,10 @@ pub mod sender {
         }
         
         fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
-            let stream = TcpStream::connect(&self.socket_addr)?;
+            let stream = std::net::TcpStream::connect(&self.socket_addr)?;
             log::info!("connected stream {}", self.stream_idx);
             
+            stream.set_nonblocking(true).expect("unsable to make stream non-blocking");
             if self.no_delay {
                 log::debug!("setting no-delay...");
                 stream.set_nodelay(true)?;
@@ -347,7 +348,7 @@ pub mod sender {
                     super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
                 }
             }
-            Ok(stream)
+            Ok(TcpStream::from_stream(stream)?)
         }
     }
     impl crate::stream::TestStream for TcpSender {
