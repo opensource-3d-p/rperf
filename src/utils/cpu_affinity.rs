@@ -29,7 +29,11 @@ impl CpuAffinityManager {
                 log::warn!("unrecognised CPU core: {}", cid_usize);
             }
         }
-        log::debug!("selecting from CPU cores {:?}", enabled_cores);
+        if enabled_cores.len() > 0 {
+            log::debug!("selecting from CPU cores {:?}", enabled_cores);
+        } else {
+            log::debug!("not applying CPU core affinity");
+        }
         
         Ok(CpuAffinityManager{
             enabled_cores: enabled_cores,
