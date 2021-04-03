@@ -408,6 +408,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         upload_config_map.remove("kind");
         let cc_length = upload_config_map.remove("length");
         upload_config_map.remove("role");
+        let cc_streams = upload_config_map.remove("streams");
         upload_config_map.remove("testId");
         upload_config_map.remove("streamPorts");
         
@@ -416,11 +417,14 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         download_config_map.remove("kind");
         download_config_map.remove("length");
         download_config_map.remove("role");
+        download_config_map.remove("streams");
         download_config_map.remove("testId");
+        
         
         common_config = serde_json::json!({
             "family": cc_family,
             "length": cc_length,
+            "streams": cc_streams,
         });
     }
     

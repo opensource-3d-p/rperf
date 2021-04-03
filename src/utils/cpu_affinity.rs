@@ -14,6 +14,9 @@ impl CpuAffinityManager {
         
         let mut enabled_cores = Vec::new();
         for cid in cores.split(',') {
+            if cid.is_empty() {
+                continue;
+            }
             let cid_usize:usize = cid.parse()?;
             let mut cid_valid = false;
             for core_id in &core_ids {
