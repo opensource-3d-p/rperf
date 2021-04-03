@@ -84,7 +84,7 @@ fn main() {
                 .long("format")
                 .short("f")
                 .required(false)
-                .default_value("json")
+                .default_value("megabyte")
                 .possible_values(&["json", "megabit", "megabyte"])
         )
         .arg(
