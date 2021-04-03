@@ -226,9 +226,9 @@ class TestIpv6(unittest.TestCase):
 class TestMisc(unittest.TestCase):
     def setUp(self):
         if _DISPLAY_LOGS:
-            self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6',))
+            self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6', '-A', '0,1'))
         else:
-            self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6'), stderr=subprocess.DEVNULL)
+            self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6', '-A', '0,1'), stderr=subprocess.DEVNULL)
             
     def tearDown(self):
         self.server.terminate()
@@ -265,8 +265,9 @@ class TestMisc(unittest.TestCase):
         self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
         
-    def test_ipv4_mapped(self):
+    def test_ipv4_mapped_with_core_affinity(self):
         result = _run_rperf_client_ipv4((
+            '-A', '2,3', #set CPU core-affinity to 2 and 3
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
             '-O', '1', #omit the first second of data from summaries
