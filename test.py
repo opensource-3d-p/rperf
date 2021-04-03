@@ -236,6 +236,7 @@ class TestMisc(unittest.TestCase):
         
     def test_hostname(self):
         result = _run_rperf_client_hostname((
+            '-N', #disable Nagle's algorithm
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
             '-O', '1', #omit the first second of data from summaries
@@ -251,6 +252,7 @@ class TestMisc(unittest.TestCase):
         
     def test_hostname_reverse(self):
         result = _run_rperf_client_hostname((
+            '-N', #disable Nagle's algorithm
             '-R', #run in reverse mode
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
