@@ -15,14 +15,6 @@ fn main() {
         .version("0.0.1")
         .about("validates network throughput capacity and reliability")
         .arg(
-            Arg::with_name("version6")
-                .help("use IPv6")
-                .takes_value(false)
-                .long("version6")
-                .short("6")
-                .required(false)
-        )
-        .arg(
             Arg::with_name("port")
                 .help("the port used for client-server interactions")
                 .takes_value(true)
@@ -58,6 +50,14 @@ fn main() {
                 .takes_value(false)
                 .long("server")
                 .short("s")
+                .required(false)
+        )
+        .arg(
+            Arg::with_name("version6")
+                .help("enable IPv6 on the server (on most hosts, this will allow both IPv4 and IPv6, but it might limit to just IPv6 on some)")
+                .takes_value(false)
+                .long("version6")
+                .short("6")
                 .required(false)
         )
         
@@ -132,7 +132,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("send_buffer")
-                .help("send_buffer, in bytes (only supported on some platforms)")
+                .help("send_buffer, in bytes; affects TCP window-size (only supported on some platforms; if set too small, a 'resource unavailable' error may occur)")
                 .takes_value(true)
                 .long("send-buffer")
                 .required(false)
@@ -140,7 +140,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("receive_buffer")
-                .help("receive_buffer, in bytes; affects TCP window-size (only supported on some platforms)")
+                .help("receive_buffer, in bytes; affects TCP window-size (only supported on some platforms; if set too small, a 'resource unavailable' error may occur)")
                 .takes_value(true)
                 .long("receive-buffer")
                 .required(false)
