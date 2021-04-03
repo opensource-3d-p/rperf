@@ -282,32 +282,37 @@ class TestMisc(unittest.TestCase):
         self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=50000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
         
-    def test_multiple_clients(self):
+    def test_multiple_simultaneous_clients(self):
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            tcp_1_ipv4 = executor.submit(_run_rperf_client_ipv4,
+            tcp_1_ipv4 = executor.submit(_run_rperf_client_ipv4, (
                 '-b', '100000', #keep it light, at 100kBps per stream
                 '-l', '4096', #try to send 4k of data at a time
                 '-t', '2', #run for two seconds
-            )
-            tcp_2_ipv6_reverse = executor.submit(_run_rperf_client_ipv6,
+            ))
+            tcp_2_ipv6_reverse = executor.submit(_run_rperf_client_ipv6, (
                 '-R', #run in reverse mode
                 '-b', '100000', #keep it light, at 100kBps per stream
                 '-l', '4096', #try to send 4k of data at a time
                 '-t', '2', #run for two seconds
-            )
-            udp_1_ipv6 = executor.submit(_run_rperf_client_ipv6,
+            ))
+            udp_1_ipv6 = executor.submit(_run_rperf_client_ipv6, (
                 '-u', #run UDP test
                 '-b', '100000', #keep it light, at 100kBps per stream
                 '-l', '1200', #try to send 1200 bytes of data at a time
                 '-t', '2', #run for two seconds
-            )
-            udp_2_hostname_reverse = executor.submit(_run_rperf_client_hostname,
+            ))
+            udp_2_hostname_reverse = executor.submit(_run_rperf_client_hostname, (
                 '-u', #run UDP test
                 '-R', #run in reverse mode
                 '-b', '100000', #keep it light, at 100kBps per stream
                 '-l', '1200', #try to send 1200 bytes of data at a time
                 '-t', '2', #run for two seconds
-            )
+            ))
+            
+            self.assertTrue(tcp_1_ipv4.result()['success'])
+            self.assertTrue(tcp_2_ipv6_reverse.result()['success'])
+            self.assertTrue(udp_1_ipv6.result()['success'])
+            self.assertTrue(udp_2_hostname_reverse.result()['success'])
 
 
 
