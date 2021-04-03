@@ -184,15 +184,16 @@ pub mod receiver {
             
             let time_delta = current_timestamp - *timestamp;
             
-            let time_delta_nanoseconds = time_delta.num_nanoseconds();
-            if time_delta_nanoseconds.is_none() {
-                log::warn!("sender and receiver clocks are too out-of-sync to calculate jitter");
-                return
-            }
-            let unwrapped_time_delta_nanoseconds = time_delta_nanoseconds.unwrap();
+            let time_delta_nanoseconds = match time_delta.num_nanoseconds() {
+                Some(ns) => ns,
+                None => {
+                    log::warn!("sender and receiver clocks are too out-of-sync to calculate jitter");
+                    return;
+                },
+            };
             
             if self.history.unbroken_sequence > 1 { //do jitter calculation
-                let delta_seconds = ((unwrapped_time_delta_nanoseconds - self.history.previous_time_delta_nanoseconds).abs() / 1_000_000_000) as f32;
+                let delta_seconds = (time_delta_nanoseconds - self.history.previous_time_delta_nanoseconds).abs() as f32 / 1_000_000_000.00;
                 
                 if self.history.unbroken_sequence > 2 { //normal jitter-calculation, per the RFC
                     let mut jitter_seconds = self.history.jitter_seconds.unwrap();
@@ -203,7 +204,7 @@ pub mod receiver {
                 }
             }
             //update time-delta
-            self.history.previous_time_delta_nanoseconds = unwrapped_time_delta_nanoseconds;
+            self.history.previous_time_delta_nanoseconds = time_delta_nanoseconds;
         }
         
         fn process_packet(&mut self, packet:&[u8]) -> bool {
