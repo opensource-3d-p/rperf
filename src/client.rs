@@ -1,5 +1,4 @@
-use std::error::Error;
-use std::net::{IpAddr, Shutdown, SocketAddr};
+use std::net::{IpAddr, Shutdown, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
@@ -23,6 +22,7 @@ use crate::stream::TestStream;
 use crate::stream::tcp;
 use crate::stream::udp;
 
+use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 /// when false, the system is shutting down
@@ -31,17 +31,15 @@ static ALIVE:AtomicBool = AtomicBool::new(true);
 static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
 const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the server to respond
 
-fn connect_to_server(ip_version:&u8, address:&str, port:&u16) -> BoxResult<TcpStream> {
-    let socket_addr:SocketAddr;
-    if *ip_version == 4 {
-        socket_addr = SocketAddr::new(IpAddr::V4(address.parse()?), *port);
-    } else if *ip_version == 6 {
-        socket_addr = SocketAddr::new(IpAddr::V6(address.parse()?), *port);
-    } else {
-        return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
+fn connect_to_server(address:&str, port:&u16) -> BoxResult<TcpStream> {
+    let destination = format!("{}:{}", address, port);
+    log::info!("connecting to server at {}...", destination);
+    
+    let server_addr = destination.to_socket_addrs()?.next();
+    if server_addr.is_none() {
+        return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
     }
-    log::info!("connecting to server at {}:{}...", address, port);
-    let stream = match TcpStream::connect(&socket_addr) {
+    let stream = match TcpStream::connect(&server_addr.unwrap()) {
         Ok(s) => s,
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
     };
@@ -83,11 +81,11 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
             display_json = true;
             display_bit = false;
         },
-        "bit" => {
+        "megabit" => {
             display_json = false;
             display_bit = true;
         },
-        "byte" => {
+        "megabyte" => {
             display_json = false;
             display_bit = false;
         },
@@ -100,21 +98,14 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     let is_udp = args.is_present("udp");
     
-    let ip_version:u8;
-    if args.is_present("version6") {
-        ip_version = 6;
-    } else {
-        ip_version = 4;
-    }
-    
     let test_id = uuid::Uuid::new_v4();
     let mut upload_config = prepare_upload_configuration(&args, test_id.as_bytes())?;
     let mut download_config = prepare_download_configuration(&args, test_id.as_bytes())?;
     
     
     //connect to the server
-    let server_address = args.value_of("client").unwrap();
-    let mut stream = connect_to_server(&ip_version, &server_address, &(args.value_of("port").unwrap().parse()?))?;
+    let mut stream = connect_to_server(&args.value_of("client").unwrap(), &(args.value_of("port").unwrap().parse()?))?;
+    let server_addr = stream.peer_addr()?;
     
     
     //scaffolding to track and relay the streams and stream-results associated with this test
@@ -181,7 +172,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
                     test_definition.clone(), &(stream_idx as u8),
-                    &ip_version, &0,
+                    &0,
+                    &server_addr.ip(),
                     &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
@@ -195,7 +187,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
                 let test = tcp::receiver::TcpReceiver::new(
                     test_definition.clone(), &(stream_idx as u8),
-                    &ip_version, &0,
+                    &0,
+                    &server_addr.ip(),
                     &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
@@ -231,7 +224,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                             log::debug!("preparing UDP-sender for stream {}...", stream_idx);
                             let test = udp::sender::UdpSender::new(
                                 test_definition.clone(), &(stream_idx as u8),
-                                &ip_version, &0, server_address.to_string(), &(port.as_i64().unwrap() as u16),
+                                &0, &server_addr.ip(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
                                 &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
@@ -246,7 +239,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                             log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                             let test = tcp::sender::TcpSender::new(
                                 test_definition.clone(), &(stream_idx as u8),
-                                &ip_version, server_address.to_string(), &(port.as_i64().unwrap() as u16),
+                                &server_addr.ip(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
                                 &(upload_config["sendInterval"].as_f64().unwrap() as f32),
                                 &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
@@ -438,7 +431,10 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         if display_json {
             println!("{}", tr.to_json_string(omit_seconds, upload_config, download_config, common_config, serde_json::json!({
                 "omit_seconds": omit_seconds,
-                "ip_version": ip_version,
+                "ip_version": match server_addr.ip() {
+                    IpAddr::V4(_) => 4,
+                    IpAddr::V6(_) => 6,
+                },
                 "reverse": args.is_present("reverse"),
             })));
         } else {

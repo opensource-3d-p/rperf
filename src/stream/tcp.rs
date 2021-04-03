@@ -71,16 +71,17 @@ pub mod receiver {
         receive_buffer: usize,
     }
     impl TcpReceiver {
-        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
+        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port:&u16, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let listener:TcpListener;
-            if *ip_version == 4 {
-                listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
-            } else if *ip_version == 6 {
-                listener = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
-            } else {
-                return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
-            }
+            match peer_ip {
+                IpAddr::V6(_) => {
+                    listener = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
+                },
+                IpAddr::V4(_) => {
+                    listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
+                },
+            };
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
             
             let mio_poll_token = Token(0);
@@ -321,7 +322,7 @@ pub mod sender {
         no_delay:bool,
     }
     impl TcpSender {
-        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, ip_version:&u8, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize, no_delay:&bool) -> super::BoxResult<TcpSender> {
+        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, receiver_ip:&IpAddr, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize, no_delay:&bool) -> super::BoxResult<TcpSender> {
             let mut staged_buffer = vec![0_u8; test_definition.length];
             for i in super::TEST_HEADER_SIZE..(staged_buffer.len()) { //fill the packet with a fixed sequence
                 staged_buffer[i] = (i % 256) as u8;
@@ -329,21 +330,12 @@ pub mod sender {
             //embed the test ID
             staged_buffer[0..16].copy_from_slice(&test_definition.test_id);
             
-            let socket_addr:SocketAddr;
-            if *ip_version == 4 {
-                socket_addr = SocketAddr::new(IpAddr::V4(receiver_host.parse()?), *receiver_port);
-            } else if *ip_version == 6 {
-                socket_addr = SocketAddr::new(IpAddr::V6(receiver_host.parse()?), *receiver_port);
-            } else {
-                return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
-            }
-            
             Ok(TcpSender{
                 active: true,
                 test_definition: test_definition,
                 stream_idx: stream_idx.to_owned(),
                 
-                socket_addr: socket_addr,
+                socket_addr: SocketAddr::new(*receiver_ip, *receiver_port),
                 stream: None,
                 
                 send_interval: send_interval.to_owned(),

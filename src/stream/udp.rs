@@ -88,19 +88,24 @@ pub mod receiver {
         framing_size: u16,
     }
     impl UdpReceiver {
-        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receive_buffer:&usize) -> super::BoxResult<UdpReceiver> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, port:&u16, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket:UdpSocket;
             let framing_size:u16;
-            if *ip_version == 4 {
-                framing_size = 28;
-                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
-            } else if *ip_version == 6 {
-                framing_size = 48;
-                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
-            } else {
-                return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
-            }
+            match peer_ip {
+                IpAddr::V6(ip) => {
+                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
+                    if ip.to_ipv4().is_some() { //our peer is actually IPv4, so packets reaching this host will be IPv4-header-prefixed
+                        framing_size = 28;
+                    } else {
+                        framing_size = 48;
+                    }
+                },
+                IpAddr::V4(_) => {
+                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
+                    framing_size = 28;
+                },
+            };
             if !cfg!(windows) { //NOTE: features unsupported on Windows
                 if *receive_buffer != 0 {
                     log::debug!("setting receive-buffer to {}...", receive_buffer);
@@ -272,16 +277,6 @@ pub mod receiver {
                                     if self.process_packet(&buf) {
                                         bytes_received += packet_size as u64 + self.framing_size as u64;
                                         
-                                        //if it's a mapped IPv4 address, subtract the IPv6 header-size delta
-                                        bytes_received -= match peer_addr.ip() {
-                                            IpAddr::V6(ip) => match ip.to_ipv4() {
-                                                Some(_) => 20,
-                                                None => 0,
-                                            },
-                                            _ => 0,
-                                        };
-                                        
-                                        
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::INTERVAL {
                                             return Some(Ok(Box::new(super::UdpReceiveResult{
@@ -381,31 +376,33 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, ip_version:&u8, port:&u16, receiver_host:String, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize) -> super::BoxResult<UdpSender> {
+        pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, port:&u16, receiver_ip:&IpAddr, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize) -> super::BoxResult<UdpSender> {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
-            
+            let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
             let socket:UdpSocket;
-            let socket_addr_server:SocketAddr;
             let framing_size:u16;
-            if *ip_version == 4 {
-                framing_size = 28;
-                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect("failed to bind socket");
-                socket_addr_server = SocketAddr::new(IpAddr::V4(receiver_host.parse()?), *receiver_port);
-            } else if *ip_version == 6 {
-                framing_size = 48;
-                socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect("failed to bind socket");
-                socket_addr_server = SocketAddr::new(IpAddr::V6(receiver_host.parse()?), *receiver_port);
-            } else {
-                return Err(Box::new(simple_error::simple_error!(format!("unsupported IP version: {}", ip_version))));
-            }
+            match receiver_ip {
+                IpAddr::V6(ip) => {
+                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
+                    if ip.to_ipv4().is_some() { //our peer is actually IPv4, so packets leaving this host will be IPv4-header-prefixed
+                        framing_size = 28;
+                    } else {
+                        framing_size = 48;
+                    }
+                },
+                IpAddr::V4(_) => {
+                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
+                    framing_size = 28;
+                },
+            };
             if !cfg!(windows) { //NOTE: features unsupported on Windows
                 if *send_buffer != 0 {
                     log::debug!("setting send-buffer to {}...", send_buffer);
                     super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
                 }
             }
-            socket.connect(socket_addr_server)?;
-            log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_server);
+            socket.connect(socket_addr_receiver)?;
+            log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
             
             let mut staged_packet = vec![0_u8; test_definition.length.into()];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) { //fill the packet with a fixed sequence

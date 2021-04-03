@@ -85,7 +85,7 @@ fn main() {
                 .short("f")
                 .required(false)
                 .default_value("json")
-                .possible_values(&["json", "bit", "byte"])
+                .possible_values(&["json", "megabit", "megabyte"])
         )
         .arg(
             Arg::with_name("udp")

@@ -40,7 +40,7 @@ lazy_static::lazy_static!{
 }
 
 
-fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
+fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
     let mut started = false;
     let peer_addr = stream.peer_addr()?;
     
@@ -87,7 +87,8 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
                                     let test = udp::receiver::UdpReceiver::new(
                                         test_definition.clone(), &(stream_idx as u8),
-                                        &ip_version, &0,
+                                        &0,
+                                        &peer_addr.ip(),
                                         &(payload["receiveBuffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
@@ -101,7 +102,8 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     log::debug!("[{}] preparing TCP-receiver for stream {}...", &peer_addr, stream_idx);
                                     let test = tcp::receiver::TcpReceiver::new(
                                         test_definition.clone(), &(stream_idx as u8),
-                                        &ip_version, &0,
+                                        &0,
+                                        &peer_addr.ip(),
                                         &(payload["receiveBuffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
@@ -124,7 +126,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     log::debug!("[{}] preparing UDP-sender for stream {}...", &peer_addr, stream_idx);
                                     let test = udp::sender::UdpSender::new(
                                         test_definition.clone(), &(stream_idx as u8),
-                                        &ip_version, &0, peer_addr.ip().to_string(), &(port.as_i64().unwrap_or(0) as u16),
+                                        &0, &peer_addr.ip(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
                                         &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
                                         &(payload["sendBuffer"].as_i64().unwrap() as usize),
@@ -139,7 +141,7 @@ fn handle_client(stream:&mut TcpStream, ip_version:&u8, cpu_affinity_manager:Arc
                                     log::debug!("[{}] preparing TCP-sender for stream {}...", &peer_addr, stream_idx);
                                     let test = tcp::sender::TcpSender::new(
                                         test_definition.clone(), &(stream_idx as u8),
-                                        &ip_version, peer_addr.ip().to_string(), &(port.as_i64().unwrap() as u16),
+                                        &peer_addr.ip(), &(port.as_i64().unwrap() as u16),
                                         &(payload["duration"].as_f64().unwrap() as f32),
                                         &(payload["sendInterval"].as_f64().unwrap() as f32),
                                         &(payload["sendBuffer"].as_i64().unwrap() as usize),
@@ -246,25 +248,15 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
     //config-parsing and pre-connection setup
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
-    let ip_version:u8;
-    if args.is_present("version6") {
-        ip_version = 6;
-    } else {
-        ip_version = 4;
-    }
-    let port:u16 = args.value_of("port").unwrap().parse()?;
-    
-    
     //start listening for connections
+    let port:u16 = args.value_of("port").unwrap().parse()?;
     let mut listener:TcpListener;
-    if ip_version == 4 {
-        listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
-    } else if ip_version == 6 {
+    if args.is_present("version6") {
         listener = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     } else {
-        return Err(Box::new(simple_error::simple_error!("unsupported IP version: {}", ip_version)));
+        listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     }
-    log::info!("server listening on port {}, IPv{}", port, ip_version);
+    log::info!("server listening on {}", listener.local_addr()?);
     
     let mio_token = Token(0);
     let poll = Poll::new()?;
@@ -292,7 +284,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             
                             let c_cam = cpu_affinity_manager.clone();
                             thread::spawn(move || {
-                                match handle_client(&mut stream, &ip_version, c_cam) {
+                                match handle_client(&mut stream, c_cam) {
                                     Ok(_) => (),
                                     Err(e) => log::error!("error in client-handler: {}", e),
                                 }
