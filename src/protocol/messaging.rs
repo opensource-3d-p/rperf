@@ -179,7 +179,7 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
             length = 1024;
         }
         if send_buffer != 0 && send_buffer < length {
-            log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to {}", send_buffer, length * 2);
+            log::warn!("requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", send_buffer, length * 2);
             send_buffer = length * 2;
         }
         Ok(prepare_configuration_udp_upload(test_id, parallel_streams, bandwidth, seconds, length as u16, send_interval, send_buffer))
@@ -189,7 +189,7 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
             length = 128 * 1024;
         }
         if send_buffer != 0 && send_buffer < length {
-            log::warn!("requested send-buffer, {}, is too small to hold the data to be sent; it will be increased to {}", send_buffer, length * 2);
+            log::warn!("requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", send_buffer, length * 2);
             send_buffer = length * 2;
         }
         
@@ -210,7 +210,7 @@ pub fn prepare_download_configuration(args:&clap::ArgMatches, test_id:&[u8; 16])
             length = 1024;
         }
         if receive_buffer != 0 && receive_buffer < length {
-            log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to {}", receive_buffer, length * 2);
+            log::warn!("requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", receive_buffer, length * 2);
             receive_buffer = length * 2;
         }
         Ok(prepare_configuration_udp_download(test_id, parallel_streams, length as u16, receive_buffer))
@@ -220,7 +220,7 @@ pub fn prepare_download_configuration(args:&clap::ArgMatches, test_id:&[u8; 16])
             length = 128 * 1024;
         }
         if receive_buffer != 0 && receive_buffer < length {
-            log::warn!("requested receive-buffer, {}, is too small to hold the data to be received; it will be increased to {}", receive_buffer, length * 2);
+            log::warn!("requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", receive_buffer, length * 2);
             receive_buffer = length * 2;
         }
         Ok(prepare_configuration_tcp_download(test_id, parallel_streams, length as usize, receive_buffer))
