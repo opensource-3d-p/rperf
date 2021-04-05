@@ -1,7 +1,5 @@
 extern crate nix;
 
-use std::time::{Duration};
-
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
 use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult};
@@ -12,9 +10,6 @@ use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE:usize = 16;
-
-const POLL_TIMEOUT:Duration = Duration::from_millis(250);
-const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
 pub struct TcpTestDefinition {
@@ -53,10 +48,13 @@ pub mod receiver {
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::io::AsRawFd;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
     
     use mio::net::{TcpListener, TcpStream};
     use mio::{Events, Ready, Poll, PollOpt, Token};
+    
+    const POLL_TIMEOUT:Duration = Duration::from_millis(250);
+    const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
     
     pub struct TcpReceiver {
         active: bool,
@@ -116,7 +114,7 @@ pub mod receiver {
             let mut events = Events::with_capacity(1);
             
             while self.active {
-                poll.poll(&mut events, Some(super::POLL_TIMEOUT))?;
+                poll.poll(&mut events, Some(POLL_TIMEOUT))?;
                 for event in events.iter() {
                     match event.token() {
                         _ => loop {
@@ -136,7 +134,7 @@ pub mod receiver {
                                     
                                     let mut buffer = [0_u8; 16];
                                     let mut events2 = Events::with_capacity(1);
-                                    poll2.poll(&mut events2, Some(super::RECEIVE_TIMEOUT))?;
+                                    poll2.poll(&mut events2, Some(RECEIVE_TIMEOUT))?;
                                     for event2 in events2.iter() {
                                         match event2.token() {
                                             _ => match verification_stream.read(&mut buffer) {
@@ -213,12 +211,12 @@ pub mod receiver {
             let start = Instant::now();
             
             while self.active {
-                if start.elapsed() >= super::RECEIVE_TIMEOUT {
+                if start.elapsed() >= RECEIVE_TIMEOUT {
                     return Some(Err(Box::new(simple_error::simple_error!("TCP reception for stream {} from {} timed out", self.stream_idx, peer_addr))));
                 }
                 
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
-                let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
+                let poll_result = self.mio_poll.poll(&mut events, Some(POLL_TIMEOUT));
                 if poll_result.is_err() {
                     return Some(Err(Box::new(poll_result.unwrap_err())));
                 }
@@ -304,6 +302,8 @@ pub mod sender {
     
     use std::thread::{sleep};
     
+    const CONNECT_TIMEOUT:Duration = Duration::from_secs(2);
+    
     pub struct TcpSender {
         active: bool,
         test_definition: super::TcpTestDefinition,
@@ -351,10 +351,16 @@ pub mod sender {
         fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
             log::debug!("preparing to connect TCP stream {}...", self.stream_idx);
             
-            let stream = std::net::TcpStream::connect(&self.socket_addr)?;
+            let raw_stream = match std::net::TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
+                Ok(s) => s,
+                Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect stream {}: {}", self.stream_idx, e))),
+            };
+            let stream = match TcpStream::from_stream(raw_stream) {
+                Ok(s) => s,
+                Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP stream {}: {}", self.stream_idx, e))),
+            };
             log::debug!("connected TCP stream {} to {}", self.stream_idx, stream.peer_addr()?);
             
-            stream.set_nonblocking(true).expect("unsable to make stream non-blocking");
             if self.no_delay {
                 log::debug!("setting no-delay...");
                 stream.set_nodelay(true)?;
@@ -365,7 +371,7 @@ pub mod sender {
                     super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
                 }
             }
-            Ok(TcpStream::from_stream(stream)?)
+            Ok(stream)
         }
     }
     impl super::TestStream for TcpSender {

@@ -2,7 +2,6 @@ extern crate log;
 extern crate nix;
 
 use std::error::Error;
-use std::time::{Duration};
 
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
@@ -13,9 +12,6 @@ use super::{INTERVAL, TestStream};
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE:u16 = 36;
-
-const POLL_TIMEOUT:Duration = Duration::from_millis(250);
-const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
 
 #[derive(Clone)]
 pub struct UdpTestDefinition {
@@ -53,12 +49,15 @@ pub mod receiver {
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::io::AsRawFd;
-    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use chrono::{NaiveDateTime};
     
     use mio::net::UdpSocket;
     use mio::{Events, Ready, Poll, PollOpt, Token};
+    
+    const POLL_TIMEOUT:Duration = Duration::from_millis(250);
+    const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
     
     struct UdpReceiverHistory {
         packets_received: u64,
@@ -249,12 +248,12 @@ pub mod receiver {
             let start = Instant::now();
             
             while self.active {
-                if start.elapsed() >= super::RECEIVE_TIMEOUT {
+                if start.elapsed() >= RECEIVE_TIMEOUT {
                     return Some(Err(Box::new(simple_error::simple_error!("UDP reception for stream {} timed out, likely because the end-signal was lost", self.stream_idx))));
                 }
                 
                 log::trace!("awaiting UDP packet on stream {}...", self.stream_idx);
-                let poll_result = self.mio_poll.poll(&mut events, Some(super::POLL_TIMEOUT));
+                let poll_result = self.mio_poll.poll(&mut events, Some(POLL_TIMEOUT));
                 if poll_result.is_err() {
                     return Some(Err(Box::new(poll_result.unwrap_err())));
                 }

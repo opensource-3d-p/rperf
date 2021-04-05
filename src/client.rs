@@ -31,6 +31,8 @@ static ALIVE:AtomicBool = AtomicBool::new(true);
 static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
 const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the server to respond
 
+const CONNECT_TIMEOUT:Duration = Duration::from_secs(2);
+
 fn connect_to_server(address:&str, port:&u16) -> BoxResult<TcpStream> {
     let destination = format!("{}:{}", address, port);
     log::info!("connecting to server at {}...", destination);
@@ -39,9 +41,13 @@ fn connect_to_server(address:&str, port:&u16) -> BoxResult<TcpStream> {
     if server_addr.is_none() {
         return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
     }
-    let stream = match TcpStream::connect(&server_addr.unwrap()) {
+    let raw_stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
         Ok(s) => s,
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
+    };
+    let stream = match TcpStream::from_stream(raw_stream) {
+        Ok(s) => s,
+        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP control-channel: {}", e))),
     };
     log::info!("connected to server");
     
