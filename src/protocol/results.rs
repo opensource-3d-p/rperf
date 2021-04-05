@@ -810,10 +810,10 @@ impl TestResults for TcpTestResults {
         };
         
         let mut output = format!("==========\n\
-                                  UDP send result over {:.2}s | {} streams\n\
+                                  TCP send result over {:.2}s | {} streams\n\
                                   bytes: {} | per second: {:.3} | {}\n\
                                   ==========\n\
-                                  UDP receive result over {:.2}s | {} streams\n\
+                                  TCP receive result over {:.2}s | {} streams\n\
                                   bytes: {} | per second: {:.3} | {}",
                                 duration_send, self.stream_results.len(),
                                 bytes_sent, send_bytes_per_second, send_throughput,
