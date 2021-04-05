@@ -429,6 +429,9 @@ pub mod sender {
                             })))
                         }
                     },
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
+                        //nothing to do
+                    },
                     Err(e) => {
                         return Some(Err(Box::new(e)));
                     },
