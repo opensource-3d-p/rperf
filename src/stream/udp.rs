@@ -455,7 +455,7 @@ pub mod sender {
             
             let cycle_start = Instant::now();
             
-            while self.active && self.remaining_duration > 0.0 {
+            while self.active && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
                 log::trace!("writing {} bytes in UDP stream {}...", self.staged_packet.len(), self.stream_idx);
                 let packet_start = Instant::now();
                 

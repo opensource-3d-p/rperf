@@ -403,7 +403,7 @@ pub mod sender {
             };
             let cycle_start = Instant::now();
             
-            while self.active && self.remaining_duration > 0.0 {
+            while self.active && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
                 log::trace!("writing {} bytes in TCP stream {} to {}...", self.staged_buffer.len(), self.stream_idx, peer_addr);
                 let packet_start = Instant::now();
                 
