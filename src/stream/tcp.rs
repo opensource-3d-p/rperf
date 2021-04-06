@@ -437,7 +437,7 @@ pub mod sender {
                     },
                 }
                 
-                if bytes_to_send_remaining <= 0 { //interval's target is exhausted
+                if bytes_to_send_remaining <= 0 { //interval's target is exhausted, so sleep until the end
                     let elapsed_time = cycle_start.elapsed();
                     if super::INTERVAL > elapsed_time {
                         sleep(super::INTERVAL - elapsed_time);
