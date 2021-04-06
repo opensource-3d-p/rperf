@@ -186,7 +186,7 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
     } else {
         log::debug!("preparing TCP upload config...");
         if length == 0 {
-            length = 128 * 1024;
+            length = 32 * 1024;
         }
         if send_buffer != 0 && send_buffer < length {
             log::warn!("requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", send_buffer, length * 2);
@@ -217,7 +217,7 @@ pub fn prepare_download_configuration(args:&clap::ArgMatches, test_id:&[u8; 16])
     } else {
         log::debug!("preparing TCP download config...");
         if length == 0 {
-            length = 128 * 1024;
+            length = 32 * 1024;
         }
         if receive_buffer != 0 && receive_buffer < length {
             log::warn!("requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", receive_buffer, length * 2);
