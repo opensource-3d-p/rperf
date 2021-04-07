@@ -1,12 +1,12 @@
 [package]
 name = "rperf"
-version = "0.0.1"
-description = "iperf, but meant for real-world conditions and analytics"
+version = "0.1.0"
+description = ""
 authors = ["Neil Tallim <neiltallim@3d-p.com>"]
 edition = "2018"
-repository = "https://gitlab.3d-p.com/neiltallim/rperf"
+repository = "https://github.com/3d-p/rperf"
 license = "<undefined>"
-keywords = ["network", "performance", "tcp", "udp", "sctp"]
+keywords = ["network", "performance", "tcp", "udp"]
 categories = ["network-utilities"]
 readme = "README.md"
 
