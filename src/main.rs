@@ -118,12 +118,12 @@ fn main() {
         )
         .arg(
             Arg::with_name("bandwidth")
-                .help("target bandwidth in bits/sec; this value is applied to each stream, with a default target of 1 megabit/second for all protocols (note: megabit, not mebibit)")
+                .help("target bandwidth in bytes/sec; this value is applied to each stream, with a default target of 1 megabit/second for all protocols (note: megabit, not mebibit)")
                 .takes_value(true)
                 .long("bandwidth")
                 .short("b")
                 .required(false)
-                .default_value("1000000")
+                .default_value("125000")
         )
         .arg(
             Arg::with_name("time")
