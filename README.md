@@ -108,7 +108,7 @@ clients can connect to the same instance.
 _rperf_ uses [_cargo_](https://doc.rust-lang.org/cargo/).
 The typical process will simply be `cargo build --release`.
 
-The resulting binary, at `target/release/rperf`, will still be reasonably large,
+The resulting binary, at `target/release/rperf`, will be reasonably large,
 but it can be stripped to a much more portable size and further compressed.
 
 
