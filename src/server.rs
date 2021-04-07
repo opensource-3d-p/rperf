@@ -272,6 +272,10 @@ struct ClientThreadMonitor<'client> {
 impl Drop for ClientThreadMonitor<'_> {
     fn drop(&mut self) {
         self.clients.remove(self.client_address);
+        if thread::panicking(){
+            log::warn!("{} disconnecting due to panic", self.client_address);
+        }
+        log::info!("{} disconnected", self.client_address);
     }
 }
 
@@ -314,7 +318,9 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             CLIENTS.insert(address.to_string(), false);
                             
                             let c_cam = cpu_affinity_manager.clone();
-                            thread::spawn(move || {
+                            let thread_builder = thread::Builder::new()
+                                .name(address.to_string().into());
+                            thread_builder.spawn(move || {
                                 //ensure the client is accounted-for even if the handler panics
                                 let _client_thread_monitor = ClientThreadMonitor{
                                     clients: &CLIENTS,
@@ -328,7 +334,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                                 
                                 //in the event of panic, this will happen when the stream is dropped
                                 stream.shutdown(Shutdown::Both).unwrap_or_default();
-                            });
+                            })?;
                         },
                         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => { //nothing to do
                             break;
