@@ -176,7 +176,8 @@ fn calculate_length_udp(length:u16) -> u16 {
 /// prepares a message used to describe the upload role in a test
 pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
-    let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()? / 8;
+    let mut bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
+    bandwidth /=  8_u64; //convert value from bits/sec into bytes/sec
     let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
     let mut send_interval:f32 = args.value_of("send_interval").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
