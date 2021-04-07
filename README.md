@@ -1,20 +1,19 @@
 # rperf
 
-_rperf_ is a Rust-based _iperf_ clone developed by 3D-P, aiming to avoid some
-reliability and consistency issues found in _iperf3_, while simultaneously
-providing richer metrics data, with a focus on operation in a loss-tolerant,
-more IoT-like environment. While it can be used as a near-drop-in replacement
-for _iperf_, and there may be benefits to doing so, its focus is on periodic
-data-collection in a monitoring capacity in a closed network, meaning it is
-not suitable for all domains that _iperf_ can serve.
+_rperf_ is a Rust-based [_iperf_](https://github.com/esnet/iperf) clone
+developed by [3D-P](https://3d-p.com/), aiming to avoid some reliability and
+consistency issues found in _iperf3_, while simultaneously providing richer
+metrics data, with a focus on operation in a loss-tolerant, more IoT-like
+environment. While it can be used as a near-drop-in replacement for _iperf_, and
+there may be benefits to doing so, its focus is on periodic data-collection in a
+monitoring capacity in a closed network, meaning it is not suitable for all
+domains that _iperf_ can serve.
 
 ## development ##
 
-_rperf_ is an independent implementation, referencing the algorithms of
-[_iperf3_](https://github.com/esnet/iperf) and
-[_zapwireless_](https://github.com/ryanchapman/zapwireless)
-to assess correctness and derive suitable corrections, but copying no code from
-either.
+_rperf_ is an independent implementation, referencing the algorithms of _iperf3_
+and [_zapwireless_](https://github.com/ryanchapman/zapwireless) to assess
+correctness and derive suitable corrections, but copying no code from either.
 
 
 In particular, the most significant issues addressed from _iperf3_ follow:
@@ -160,12 +159,6 @@ produces an iterator-like handler on either side. Both the client and server run
 these iterator-analogues against each other asynchronously until the test period
 ends, at which point the sender indicates completion within its stream.
 
-During each exchange interval, an attempt is made to send `length` bytes at a
-time, until the amount written to the stream meets or exceeds the bandwdith
-target, at which point the sender goes silent until the start of the next
-interval; the data sent within an interval should be uniformly distributed over
-the period.
-
 To reliably handle the possibility of disconnects at the stream level, a
 keepalive mechanism in the client-server stream, over which test-results are
 sent from the server at regular intervals, will terminate outstanding
@@ -175,3 +168,20 @@ The host OS's TCP and UDP mechanisms are used for all actual traffic exchanged,
 with some tuning parameters exposed. This approach was chosen over a userspace
 implementation on top of layer-2 or layer-3 because it most accurately
 represents the way real-world applications will behave.
+
+#### considerations ####
+
+The "timestamp" values visible in JSON-serialised interval data are
+host-relative, so unless your environment has very high system-clock accuracy,
+send-timestamps should only be compared to other send-timestamps and likewise
+for receive-timestamps. In general, this data is not useful outside of
+correctness-validation, however.
+
+During each exchange interval, an attempt is made to send `length` bytes at a
+time, until the amount written to the stream meets or exceeds the bandwdith
+target, at which point the sender goes silent until the start of the next
+interval; the data sent within an interval should be uniformly distributed over
+the period.
+
+Stream indexes start at `0`, not `1`. This probably won't surprise anyone, but
+seeing "stream 0" in a report is not cause for concern.
