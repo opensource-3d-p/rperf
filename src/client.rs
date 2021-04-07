@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
- 
+
 use std::net::{IpAddr, Shutdown, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

@@ -25,7 +25,7 @@ use std::error::Error;
 
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
-use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult};
+use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult, get_unix_timestamp};
 
 use super::{INTERVAL, TestStream};
 
@@ -300,6 +300,8 @@ pub mod receiver {
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::INTERVAL {
                                             return Some(Ok(Box::new(super::UdpReceiveResult{
+                                                timestamp: super::get_unix_timestamp(),
+                                                
                                                 stream_idx: self.stream_idx,
                                                 
                                                 duration: elapsed_time.as_secs_f32(),
@@ -334,6 +336,8 @@ pub mod receiver {
             }
             if bytes_received > 0 {
                 Some(Ok(Box::new(super::UdpReceiveResult{
+                    timestamp: super::get_unix_timestamp(),
+                    
                     stream_idx: self.stream_idx,
                     
                     duration: start.elapsed().as_secs_f32(),
@@ -496,6 +500,8 @@ pub mod sender {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
                             return Some(Ok(Box::new(super::UdpSendResult{
+                                timestamp: super::get_unix_timestamp(),
+                                
                                 stream_idx: self.stream_idx,
                                 
                                 duration: elapsed_time.as_secs_f32(),
@@ -529,6 +535,8 @@ pub mod sender {
             }
             if bytes_sent > 0 {
                 Some(Ok(Box::new(super::UdpSendResult{
+                    timestamp: super::get_unix_timestamp(),
+                    
                     stream_idx: self.stream_idx,
                     
                     duration: cycle_start.elapsed().as_secs_f32(),

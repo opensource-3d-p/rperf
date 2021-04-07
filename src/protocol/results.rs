@@ -19,6 +19,7 @@
  */
  
 use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Serialize, Deserialize};
 
@@ -41,6 +42,13 @@ pub enum IntervalResultKind {
     TcpSend,
     UdpReceive,
     UdpSend,
+}
+
+pub fn get_unix_timestamp() -> f64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(n) => n.as_secs_f64(),
+        Err(_) => panic!("SystemTime before UNIX epoch"),
+    }
 }
 
 pub trait IntervalResult {
@@ -167,6 +175,8 @@ impl IntervalResult for ServerFailedResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct TcpReceiveResult {
+    pub timestamp: f64,
+    
     pub stream_idx: u8,
     
     pub duration: f32,
@@ -227,6 +237,8 @@ impl IntervalResult for TcpReceiveResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct TcpSendResult {
+    pub timestamp: f64,
+    
     pub stream_idx: u8,
     
     pub duration: f32,
@@ -288,6 +300,8 @@ impl IntervalResult for TcpSendResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct UdpReceiveResult {
+    pub timestamp: f64,
+    
     pub stream_idx: u8,
     
     pub duration: f32,
@@ -361,6 +375,8 @@ impl IntervalResult for UdpReceiveResult {
 
 #[derive(Serialize, Deserialize)]
 pub struct UdpSendResult {
+    pub timestamp: f64,
+    
     pub stream_idx: u8,
     
     pub duration: f32,
