@@ -149,10 +149,10 @@ fn validate_bandwidth(bandwidth:u64) -> u64 {
 }
 
 fn validate_send_interval(send_interval:f32) -> f32 {
-    if send_interval > 0.0 {
+    if send_interval > 0.0 && send_interval <= 1.0 {
         send_interval
     } else {
-        log::warn!("send-interval was not specified; defaulting to once per second");
+        log::warn!("send-interval was invalid or not specified; defaulting to once per second");
         1.0
     }
 }
