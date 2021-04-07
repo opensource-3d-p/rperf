@@ -1,21 +1,88 @@
 # rperf
 
-_rperf_ is a Rust-based _iperf_ clone, aiming to avoid some reliability and
-consistency issues found in _iperf3_, while simultaneously providing richer
-metrics data, with a focus on operation in a loss-tolerant, more IoT-like
-environment. While it can be used as a near-drop-in replacement for _iperf_,
-and there may be benefits to doing so, its focus is on periodic data-collection
-in a monitoring capacity.
+_rperf_ is a Rust-based _iperf_ clone developed by 3D-P, aiming to avoid some
+reliability and consistency issues found in _iperf3_, while simultaneously
+providing richer metrics data, with a focus on operation in a loss-tolerant,
+more IoT-like environment. While it can be used as a near-drop-in replacement
+for _iperf_, and there may be benefits to doing so, its focus is on periodic
+data-collection in a monitoring capacity in a closed network, meaning it is
+not suitable for all domains that _iperf_ can serve.
+
+## development ##
+
+_rperf_ is an independent implementation, referencing the algorithms of
+[_iperf3_](https://github.com/esnet/iperf) and
+[_zapwireless_](https://github.com/ryanchapman/zapwireless)
+to assess correctness and derive suitable corrections, but copying no code from
+either.
+
+
+In particular, the most significant issues addressed from _iperf3_ follow:
+
+* _rperf_'s implementation of
+  [RFC 1889](https://tools.ietf.org/html/rfc1889#appendix-A.8) for streaming
+  jitter calculation starts by assuming a delta between the first and second
+  packets in a sequence, rather than beginning with 0, which creates
+  artificially low values, and gaps in a sequence trigger a reset of the count,
+  instead of continuing from the last-observed event, which conversely creates
+  artificially high values.
+  
+* Duplicate packets are accounted for in UDP exchanges and out-of-order packets
+  are counted as independent events.
+  
+* All traffic can be emitted proportionally at regular sub-second intervals,
+  allowing for configurations that more accurately reflect real data
+  transmission and sending algorithms.
+  
+  * This addresses a commonly seen case in embedded-like systems where a piece
+    of equipment has a very small send- or receive-buffer that the OS does not
+    know about and it will just drop packets when it receives a huge mass of
+    data in a single burst, incorrectly unre-reporting network capacity.
+    
+* Stream-configuration and results are exchanged via a dedicated connection and
+  every data-path has clearly defined timeout, completion and failure semantics,
+  so execution doesn't hang indefinitely on either side of a test when key
+  packets are lost.
+
+* _rperf_'s JSON output is structurally legal. No unquoted strings, repeated
+  keys, or dangling commas, which require pre-processing before consumption.
+
+
+In contrast to _zapwireless_, the following improvements are realised:
+
+* _rperf_ uses a classic client-server architecture, so there's no need to
+  maintain a running process on devices that waits for a test-execution request.
+
+* IPv6 is supported.
+
+* Multiple streams may be run in parallel as part of a test.
+
+* An `omit` option is available to discard TCP ramp-up time from results.
+
+* Output is available in JSON for easier telemetry-harvesting.
+
+## platforms ##
+
+_rperf_ should build and work on all major platforms, though its development and
+usage focus is on Linux-based systems, so that is where it will be most
+feature-complete.
+
+Pull-requests for implementations of equivalent features for other systems are
+welcome.
 
 
 ## usage
+
+Everything is outlined in the output of `--help` and most users familiar with
+similar tools should feel comfortable immediately.
 
 _rperf_ works much like _iperf3_, sharing a lot of concepts and even
 command-line flags. One key area where it differs is that the client drives
 all of the configuration process while the server just complies to the best
 of its ability and provides a stream of results. This means that the server
-will not present test-results directly and also that TCP and UDP tests can
-be run against the same instance, potentially by many clients in parallel.
+will not present test-results directly via its interface and also that TCP
+and UDP tests can be run against the same instance, potentially by many clients
+simultaneously.
 
 In its normal mode of operation, the client will upload data to the server;
 when the `reverse` flag is set, the client will receive data.
@@ -38,9 +105,11 @@ clients can connect to the same instance.
 
 ## building
 
-_rperf_ uses _cargo_. The typical process will be `cargo build --release`. The
-resulting binary, at `target/release/rperf`, will still be reasonably large,
-but it can be stripped to a much more portable size.
+_rperf_ uses _cargo_. The typical process will simply be
+`cargo build --release`.
+
+The resulting binary, at `target/release/rperf`, will still be reasonably large,
+but it can be stripped to a much more portable size and further compressed.
 
 
 ## theory of operation
@@ -67,9 +136,9 @@ data-exchange.
 ### implementation details
 
 The client-server relationship is treated as a very central aspect of this
-design, in contrast to _iperf3_ where they're more like peers and _zapwireless_
-where each participant runs its own daemon and a third process orchestrates
-communication.
+design, in contrast to _iperf3_, where they're more like peers, and
+_zapwireless_, where each participant runs its own daemon and a third process
+orchestrates communication.
 
 Notably, all data-gathering, calculation, and display happens client-side, with
 the server simply returning what it observed. This can lead to some drift in
@@ -89,6 +158,12 @@ handles that client's specific request; internally, each stream for the test
 produces an iterator-like handler on either side. Both the client and server run
 these iterator-analogues against each other asynchronously until the test period
 ends, at which point the sender indicates completion within its stream.
+
+During each exchange interval, an attempt is made to send `length` bytes at a
+time, until the amount written to the stream meets or exceeds the bandwdith
+target, at which point the sender goes silent until the start of the next
+interval; the data sent within an interval should be uniformly distributed over
+the period.
 
 To reliably handle the possibility of disconnects at the stream level, a
 keepalive mechanism in the client-server stream, over which test-results are
