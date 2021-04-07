@@ -35,8 +35,8 @@ In particular, the most significant issues addressed from _iperf3_ follow:
   
   * This addresses a commonly seen case in embedded-like systems where a piece
     of equipment has a very small send- or receive-buffer that the OS does not
-    know about and it will just drop packets when it receives a huge mass of
-    data in a single burst, incorrectly unre-reporting network capacity.
+    know about and it will just drop packets when receiving a huge mass of
+    data in a single burst, incorrectly under-reporting network capacity.
     
 * Stream-configuration and results are exchanged via a dedicated connection and
   every data-path has clearly defined timeout, completion and failure semantics,
