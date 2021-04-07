@@ -185,3 +185,13 @@ the period.
 
 Stream indexes start at `0`, not `1`. This probably won't surprise anyone, but
 seeing "stream 0" in a report is not cause for concern.
+
+
+## copyright and distribution ##
+
+_rperf_ is distributed by Evtech Solutions, Ltd., dba 3D-P, under the
+[GNU GPL version 3](https://www.gnu.org/licenses/gpl-3.0.en.html), the text of
+which may be found in `COPYING`.
+
+Authorship details, copyright specifics, and transferability notes are present
+within the source code itself.
