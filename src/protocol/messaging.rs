@@ -178,7 +178,7 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
     let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
     let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
-    let mut send_interval:f32 = args.value_of("sendinterval").unwrap().parse()?;
+    let mut send_interval:f32 = args.value_of("send_interval").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
     
     let mut send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
