@@ -136,7 +136,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("send_interval")
-                .help("the interval at which to send batches of data, in seconds, between [0.0 and 1.0); this is used to evenly spread packets out over time, defaulting to 0.05")
+                .help("the interval at which to send batches of data, in seconds, between [0.0 and 1.0); this is used to evenly spread packets out over time")
                 .takes_value(true)
                 .long("send-interval")
                 .required(false)
