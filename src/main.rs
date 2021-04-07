@@ -123,7 +123,7 @@ fn main() {
                 .long("bandwidth")
                 .short("b")
                 .required(false)
-                .default_value("1000000")
+                .default_value("125000")
         )
         .arg(
             Arg::with_name("time")
