@@ -20,7 +20,6 @@
  
 extern crate log;
 extern crate env_logger;
-extern crate lazy_static;
 
 use clap::{App, Arg};
 

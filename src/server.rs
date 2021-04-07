@@ -21,13 +21,11 @@
 use std::error::Error;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
 use std::thread;
 use std::time::{Duration};
-
-use chashmap::CHashMap;
 
 use clap::ArgMatches;
 
@@ -51,13 +49,8 @@ const POLL_TIMEOUT:Duration = Duration::from_millis(500);
 /// when false, the system is shutting down
 static ALIVE:AtomicBool = AtomicBool::new(true);
 
-lazy_static::lazy_static!{
-    /// a means of keeping track of which clients are running tests
-    static ref CLIENTS:CHashMap<String, bool> = {
-        let hm = CHashMap::new();
-        hm
-    };
-}
+/// a count of connected clients
+static CLIENTS:AtomicU16 = AtomicU16::new(0);
 
 
 fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
@@ -265,17 +258,17 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
 }
 
 /// a panic-tolerant means of indicating that a client has been disconnected
-struct ClientThreadMonitor<'client> {
-    clients: &'client CLIENTS,
-    client_address: &'client String,
+struct ClientThreadMonitor {
+    client_address: String,
 }
-impl Drop for ClientThreadMonitor<'_> {
+impl Drop for ClientThreadMonitor {
     fn drop(&mut self) {
-        self.clients.remove(self.client_address);
+        CLIENTS.fetch_sub(1, Ordering::Relaxed);
         if thread::panicking(){
             log::warn!("{} disconnecting due to panic", self.client_address);
+        } else {
+            log::info!("{} disconnected", self.client_address);
         }
-        log::info!("{} disconnected", self.client_address);
     }
 }
 
@@ -315,7 +308,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
                             stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
                             
-                            CLIENTS.insert(address.to_string(), false);
+                            CLIENTS.fetch_add(1, Ordering::Relaxed);
                             
                             let c_cam = cpu_affinity_manager.clone();
                             let thread_builder = thread::Builder::new()
@@ -323,8 +316,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             thread_builder.spawn(move || {
                                 //ensure the client is accounted-for even if the handler panics
                                 let _client_thread_monitor = ClientThreadMonitor{
-                                    clients: &CLIENTS,
-                                    client_address: &address.to_string(),
+                                    client_address: address.to_string(),
                                 };
                                 
                                 match handle_client(&mut stream, c_cam) {
@@ -349,9 +341,14 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
     }
     
     //wait until all clients have been disconnected
-    while CLIENTS.len() > 0 {
-        log::info!("waiting for {} clients to finish...", CLIENTS.len());
-        thread::sleep(POLL_TIMEOUT);
+    loop {
+        let clients_count = CLIENTS.load(Ordering::Relaxed);
+        if clients_count > 0 {
+            log::info!("waiting for {} clients to finish...", clients_count);
+            thread::sleep(POLL_TIMEOUT);
+        } else {
+            break;
+        }
     }
     Ok(())
 }

@@ -11,13 +11,11 @@ categories = ["network-utilities"]
 readme = "README.md"
 
 [dependencies]
-chashmap = "2.2"
 chrono = "0.4"
 clap = "~2.33.3"
 core_affinity = "0.5"
 ctrlc = "3.1"
 env_logger = "0.8"
-lazy_static = "1.4"
 log = {version = "0.4", features = ["std"]}
 mio = "0.6"
 nix = "0.20"
