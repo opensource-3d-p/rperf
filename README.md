@@ -45,7 +45,8 @@ In particular, the most significant issues addressed from _iperf3_ follow:
   packets are lost.
 
 * _rperf_'s JSON output is structurally legal. No unquoted strings, repeated
-  keys, or dangling commas, which require pre-processing before consumption.
+  keys, or dangling commas, all of which require pre-processing before
+  consumption or cause unexpected errors.
 
 
 In contrast to _zapwireless_, the following improvements are realised:
