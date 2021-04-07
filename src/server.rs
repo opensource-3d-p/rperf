@@ -264,6 +264,17 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
     Ok(())
 }
 
+/// a panic-tolerant means of indicating that a client has been disconnected
+struct ClientThreadMonitor<'client> {
+    clients: &'client CLIENTS,
+    client_address: &'client String,
+}
+impl Drop for ClientThreadMonitor<'_> {
+    fn drop(&mut self) {
+        self.clients.remove(self.client_address);
+    }
+}
+
 pub fn serve(args:ArgMatches) -> BoxResult<()> {
     //config-parsing and pre-connection setup
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
@@ -304,11 +315,18 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             
                             let c_cam = cpu_affinity_manager.clone();
                             thread::spawn(move || {
+                                //ensure the client is accounted-for even if the handler panics
+                                let _client_thread_monitor = ClientThreadMonitor{
+                                    clients: &CLIENTS,
+                                    client_address: &address.to_string(),
+                                };
+                                
                                 match handle_client(&mut stream, c_cam) {
                                     Ok(_) => (),
                                     Err(e) => log::error!("error in client-handler: {}", e),
                                 }
-                                CLIENTS.remove(&address.to_string());
+                                
+                                //in the event of panic, this will happen when the stream is dropped
                                 stream.shutdown(Shutdown::Both).unwrap_or_default();
                             });
                         },
