@@ -32,6 +32,7 @@ use super::{INTERVAL, TestStream};
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE:u16 = 36;
+const UDP_HEADER_SIZE:u16 = 8;
 
 #[derive(Clone)]
 pub struct UdpTestDefinition {
@@ -278,7 +279,7 @@ pub mod receiver {
                                     }
                                     
                                     if self.process_packet(&buf) {
-                                        bytes_received += packet_size as u64;
+                                        bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
                                         
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::INTERVAL {
@@ -456,7 +457,7 @@ pub mod sender {
                         
                         packets_sent += 1;
                         
-                        let bytes_written = packet_size as i64;
+                        let bytes_written = packet_size as i64 + super::UDP_HEADER_SIZE as i64;
                         bytes_sent += bytes_written as u64;
                         bytes_to_send_remaining -= bytes_written;
                         bytes_to_send_per_interval_slice_remaining -= bytes_written;
