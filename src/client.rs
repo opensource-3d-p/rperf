@@ -437,6 +437,9 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         let cc_streams = upload_config_map.remove("streams");
         upload_config_map.remove("test_id");
         upload_config_map.remove("stream_ports");
+        if upload_config_map["send_buffer"].as_i64().unwrap() == 0 {
+            upload_config_map.remove("send_buffer");
+        }
         
         let download_config_map = download_config.as_object_mut().unwrap();
         download_config_map.remove("family");
@@ -445,7 +448,9 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         download_config_map.remove("role");
         download_config_map.remove("streams");
         download_config_map.remove("test_id");
-        
+        if download_config_map["receive_buffer"].as_i64().unwrap() == 0 {
+            download_config_map.remove("receive_buffer");
+        }
         
         common_config = serde_json::json!({
             "family": cc_family,
