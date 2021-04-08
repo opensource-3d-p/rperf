@@ -53,6 +53,8 @@ In contrast to _zapwireless_, the following improvements are realised:
 * _rperf_ uses a classic client-server architecture, so there's no need to
   maintain a running process on devices that waits for a test-execution request.
 
+* Jitter is calculated.
+
 * IPv6 is supported.
 
 * Multiple streams may be run in parallel as part of a test.
