@@ -81,6 +81,14 @@ fn main() {
                 .short("6")
                 .required(false)
         )
+        .arg(
+            Arg::with_name("client_limit")
+                .help("limit the number of concurrent clients that can be processed by a server; any over this count will be immediately disconnected")
+                .takes_value(true)
+                .long("client-limit")
+                .required(false)
+                .default_value("0")
+        )
         
         .arg(
             Arg::with_name("client")
