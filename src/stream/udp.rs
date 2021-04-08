@@ -102,28 +102,13 @@ pub mod receiver {
         socket: UdpSocket,
         mio_poll_token: Token,
         mio_poll: Poll,
-        
-        //the fixed number of bytes that frame each packet
-        framing_size: u16,
     }
     impl UdpReceiver {
         pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, port:&u16, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
-            let socket:UdpSocket;
-            let framing_size:u16;
-            match peer_ip {
-                IpAddr::V6(ip) => {
-                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
-                    if ip.to_ipv4().is_some() { //our peer is actually IPv4, so packets reaching this host will be IPv4-header-prefixed
-                        framing_size = 28;
-                    } else {
-                        framing_size = 48;
-                    }
-                },
-                IpAddr::V4(_) => {
-                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
-                    framing_size = 28;
-                },
+            let socket = match peer_ip {
+                IpAddr::V6(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
+                IpAddr::V4(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
             };
             if !cfg!(windows) { //NOTE: features unsupported on Windows
                 if *receive_buffer != 0 {
@@ -163,8 +148,6 @@ pub mod receiver {
                 socket: socket,
                 mio_poll_token: mio_poll_token,
                 mio_poll: mio_poll,
-                
-                framing_size: framing_size,
             })
         }
         
@@ -295,7 +278,7 @@ pub mod receiver {
                                     }
                                     
                                     if self.process_packet(&buf) {
-                                        bytes_received += packet_size as u64 + self.framing_size as u64;
+                                        bytes_received += packet_size as u64;
                                         
                                         let elapsed_time = start.elapsed();
                                         if elapsed_time >= super::INTERVAL {
@@ -392,9 +375,6 @@ pub mod sender {
         //the interval, in seconds, at which to send data
         send_interval: f32,
         
-        //the fixed number of bytes that frame each packet
-        framing_size: u16,
-        
         remaining_duration: f32,
         next_packet_id: u64,
         staged_packet: Vec<u8>,
@@ -403,21 +383,9 @@ pub mod sender {
         pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, port:&u16, receiver_ip:&IpAddr, receiver_port:&u16, send_duration:&f32, send_interval:&f32, send_buffer:&usize) -> super::BoxResult<UdpSender> {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
             let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
-            let socket:UdpSocket;
-            let framing_size:u16;
-            match receiver_ip {
-                IpAddr::V6(ip) => {
-                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
-                    if ip.to_ipv4().is_some() { //our peer is actually IPv4, so packets leaving this host will be IPv4-header-prefixed
-                        framing_size = 28;
-                    } else {
-                        framing_size = 48;
-                    }
-                },
-                IpAddr::V4(_) => {
-                    socket = UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str());
-                    framing_size = 28;
-                },
+            let socket = match receiver_ip {
+                IpAddr::V6(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
+                IpAddr::V4(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
             };
             if !cfg!(windows) { //NOTE: features unsupported on Windows
                 if *send_buffer != 0 {
@@ -443,8 +411,6 @@ pub mod sender {
                 socket: socket,
                 
                 send_interval: send_interval.to_owned(),
-                
-                framing_size: framing_size,
                 
                 remaining_duration: send_duration.to_owned(),
                 next_packet_id: 0,
@@ -490,7 +456,7 @@ pub mod sender {
                         
                         packets_sent += 1;
                         
-                        let bytes_written = (packet_size + (self.framing_size as usize)) as i64;
+                        let bytes_written = packet_size as i64;
                         bytes_sent += bytes_written as u64;
                         bytes_to_send_remaining -= bytes_written;
                         bytes_to_send_per_interval_slice_remaining -= bytes_written;
