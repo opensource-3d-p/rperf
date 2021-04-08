@@ -274,6 +274,7 @@ pub mod receiver {
                                     }
                                     
                                     if self.process_packet(&buf, &mut history) {
+                                        //NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
                                         bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
                                         
                                         let elapsed_time = start.elapsed();
