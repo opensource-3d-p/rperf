@@ -18,6 +18,8 @@ correctness and derive suitable corrections, but copying no code from either.
 
 In particular, the most significant issues addressed from _iperf3_ follow:
 
+* Multiple concurrent clients are supported by any given server.
+
 * _rperf_'s implementation of
   [RFC 1889](https://tools.ietf.org/html/rfc1889#appendix-A.8) for streaming
   jitter calculation starts by assuming a delta between the first and second
