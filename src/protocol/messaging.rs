@@ -33,7 +33,7 @@ pub fn prepare_connect(stream_ports:&[u16]) -> serde_json::Value {
     serde_json::json!({
         "kind": "connect",
         
-        "streamPorts": stream_ports,
+        "stream_ports": stream_ports,
     })
 }
 
@@ -62,16 +62,16 @@ fn prepare_configuration_tcp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64
         "family": "tcp",
         "role": "upload",
         
-        "testId": test_id,
+        "test_id": test_id,
         "streams": validate_streams(streams),
         
         "bandwidth": validate_bandwidth(bandwidth),
         "duration": seconds,
         "length": calculate_length_tcp(length),
-        "sendInterval": validate_send_interval(send_interval),
+        "send_interval": validate_send_interval(send_interval),
         
-        "sendBuffer": send_buffer,
-        "noDelay": no_delay,
+        "send_buffer": send_buffer,
+        "no_delay": no_delay,
     })
 }
 
@@ -83,11 +83,11 @@ fn prepare_configuration_tcp_download(test_id:&[u8; 16], streams:u8, length:usiz
         "family": "tcp",
         "role": "download",
         
-        "testId": test_id,
+        "test_id": test_id,
         "streams": validate_streams(streams),
         
         "length": calculate_length_tcp(length),
-        "receiveBuffer": receive_buffer,
+        "receive_buffer": receive_buffer,
     })
 }
 
@@ -99,15 +99,15 @@ fn prepare_configuration_udp_upload(test_id:&[u8; 16], streams:u8, bandwidth:u64
         "family": "udp",
         "role": "upload",
         
-        "testId": test_id,
+        "test_id": test_id,
         "streams": validate_streams(streams),
         
         "bandwidth": validate_bandwidth(bandwidth),
         "duration": seconds,
         "length": calculate_length_udp(length),
-        "sendInterval": validate_send_interval(send_interval),
+        "send_interval": validate_send_interval(send_interval),
         
-        "sendBuffer": send_buffer,
+        "send_buffer": send_buffer,
     })
 }
 
@@ -119,11 +119,11 @@ fn prepare_configuration_udp_download(test_id:&[u8; 16], streams:u8, length:u16,
         "family": "udp",
         "role": "download",
         
-        "testId": test_id,
+        "test_id": test_id,
         "streams": validate_streams(streams),
         
         "length": calculate_length_udp(length),
-        "receiveBuffer": receive_buffer,
+        "receive_buffer": receive_buffer,
     })
 }
 

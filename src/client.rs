@@ -200,7 +200,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     test_definition.clone(), &(stream_idx as u8),
                     &0,
                     &server_addr.ip(),
-                    &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
+                    &(download_config["receive_buffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -215,7 +215,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     test_definition.clone(), &(stream_idx as u8),
                     &0,
                     &server_addr.ip(),
-                    &(download_config["receiveBuffer"].as_i64().unwrap() as usize),
+                    &(download_config["receive_buffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -223,7 +223,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         }
         
         //add the port-list to the upload-config that the server will receive; this is in stream-index order
-        upload_config["streamPorts"] = serde_json::json!(stream_ports);
+        upload_config["stream_ports"] = serde_json::json!(stream_ports);
         
         //let the server know what we're expecting
         send(&mut stream, &upload_config)?;
@@ -246,14 +246,14 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                         log::info!("preparing for UDP test with {} streams...", stream_count);
                         
                         let test_definition = udp::UdpTestDefinition::new(&upload_config)?;
-                        for (stream_idx, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                        for (stream_idx, port) in connection_payload.get("stream_ports").unwrap().as_array().unwrap().iter().enumerate() {
                             log::debug!("preparing UDP-sender for stream {}...", stream_idx);
                             let test = udp::sender::UdpSender::new(
                                 test_definition.clone(), &(stream_idx as u8),
                                 &0, &server_addr.ip(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
-                                &(upload_config["sendInterval"].as_f64().unwrap() as f32),
-                                &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
+                                &(upload_config["send_interval"].as_f64().unwrap() as f32),
+                                &(upload_config["send_buffer"].as_i64().unwrap() as usize),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -261,15 +261,15 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                         log::info!("preparing for TCP test with {} streams...", stream_count);
                         
                         let test_definition = tcp::TcpTestDefinition::new(&upload_config)?;
-                        for (stream_idx, port) in connection_payload.get("streamPorts").unwrap().as_array().unwrap().iter().enumerate() {
+                        for (stream_idx, port) in connection_payload.get("stream_ports").unwrap().as_array().unwrap().iter().enumerate() {
                             log::debug!("preparing TCP-sender for stream {}...", stream_idx);
                             let test = tcp::sender::TcpSender::new(
                                 test_definition.clone(), &(stream_idx as u8),
                                 &server_addr.ip(), &(port.as_i64().unwrap() as u16),
                                 &(upload_config["duration"].as_f64().unwrap() as f32),
-                                &(upload_config["sendInterval"].as_f64().unwrap() as f32),
-                                &(upload_config["sendBuffer"].as_i64().unwrap() as usize),
-                                &(upload_config["noDelay"].as_bool().unwrap()),
+                                &(upload_config["send_interval"].as_f64().unwrap() as f32),
+                                &(upload_config["send_buffer"].as_i64().unwrap() as usize),
+                                &(upload_config["no_delay"].as_bool().unwrap()),
                             )?;
                             parallel_streams.push(Arc::new(Mutex::new(test)));
                         }
@@ -435,8 +435,8 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         let cc_length = upload_config_map.remove("length");
         upload_config_map.remove("role");
         let cc_streams = upload_config_map.remove("streams");
-        upload_config_map.remove("testId");
-        upload_config_map.remove("streamPorts");
+        upload_config_map.remove("test_id");
+        upload_config_map.remove("stream_ports");
         
         let download_config_map = download_config.as_object_mut().unwrap();
         download_config_map.remove("family");
@@ -444,7 +444,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
         download_config_map.remove("length");
         download_config_map.remove("role");
         download_config_map.remove("streams");
-        download_config_map.remove("testId");
+        download_config_map.remove("test_id");
         
         
         common_config = serde_json::json!({

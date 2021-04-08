@@ -45,7 +45,7 @@ pub struct UdpTestDefinition {
 impl UdpTestDefinition {
     pub fn new(details:&serde_json::Value) -> super::BoxResult<UdpTestDefinition> {
         let mut test_id_bytes = [0_u8; 16];
-        for (i, v) in details.get("testId").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
+        for (i, v) in details.get("test_id").unwrap_or(&serde_json::json!([])).as_array().unwrap().iter().enumerate() {
             if i >= 16 { //avoid out-of-bounds if given malicious data
                 break;
             }

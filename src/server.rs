@@ -102,7 +102,7 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                                         test_definition.clone(), &(stream_idx as u8),
                                         &0,
                                         &peer_addr.ip(),
-                                        &(payload["receiveBuffer"].as_i64().unwrap() as usize),
+                                        &(payload["receive_buffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -117,7 +117,7 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                                         test_definition.clone(), &(stream_idx as u8),
                                         &0,
                                         &peer_addr.ip(),
-                                        &(payload["receiveBuffer"].as_i64().unwrap() as usize),
+                                        &(payload["receive_buffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
@@ -129,7 +129,7 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                         } else { //upload
                             log::debug!("[{}] running in reverse-mode: server will be uploading data", &peer_addr);
                             
-                            let stream_ports = payload.get("streamPorts").unwrap().as_array().unwrap();
+                            let stream_ports = payload.get("stream_ports").unwrap().as_array().unwrap();
                             
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_ports.len());
@@ -141,8 +141,8 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                                         test_definition.clone(), &(stream_idx as u8),
                                         &0, &peer_addr.ip(), &(port.as_i64().unwrap_or(0) as u16),
                                         &(payload.get("duration").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as f32),
-                                        &(payload.get("sendInterval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
-                                        &(payload["sendBuffer"].as_i64().unwrap() as usize),
+                                        &(payload.get("send_interval").unwrap_or(&serde_json::json!(1.0)).as_f64().unwrap() as f32),
+                                        &(payload["send_buffer"].as_i64().unwrap() as usize),
                                     )?;
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
@@ -156,9 +156,9 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                                         test_definition.clone(), &(stream_idx as u8),
                                         &peer_addr.ip(), &(port.as_i64().unwrap() as u16),
                                         &(payload["duration"].as_f64().unwrap() as f32),
-                                        &(payload["sendInterval"].as_f64().unwrap() as f32),
-                                        &(payload["sendBuffer"].as_i64().unwrap() as usize),
-                                        &(payload["noDelay"].as_bool().unwrap()),
+                                        &(payload["send_interval"].as_f64().unwrap() as f32),
+                                        &(payload["send_buffer"].as_i64().unwrap() as usize),
+                                        &(payload["no_delay"].as_bool().unwrap()),
                                     )?;
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
