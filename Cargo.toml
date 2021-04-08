@@ -1,11 +1,11 @@
 [package]
 name = "rperf"
 version = "0.1.0"
-description = ""
+description = "validates network throughput capacity and reliability"
 authors = ["Neil Tallim <neiltallim@3d-p.com>"]
 edition = "2018"
 repository = "https://github.com/3d-p/rperf"
-license = "<undefined>"
+license = "GPLv3"
 keywords = ["network", "performance", "tcp", "udp"]
 categories = ["network-utilities"]
 readme = "README.md"
@@ -23,3 +23,22 @@ serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0"
 simple-error = "0.2"
 uuid = {version = "0.8", features = ["v4"]}
+
+#configuration for cargo-deb
+#install with "cargo install cargo-deb"
+#then "cargo deb" to build simple Debian packages for this project
+[package.metadata.deb]
+maintainer-scripts = "debian-maintainer-scripts/"
+copyright = "(C) 2021 Evtech Solutions, Ltd., dba 3D-P"
+license-file = ["COPYING", "0"]
+extended-description = """
+Rust-based iperf clone with a number of behavioural fixes and corrections, plus
+a feature-set aimed at continuous monitoring in an IoT-like environment.
+"""
+section = "net"
+priority = "optional"
+
+[package.metadata.deb.systemd-units]
+#don't enable the service by default
+enable = false
+start = false

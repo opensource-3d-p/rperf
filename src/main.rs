@@ -31,8 +31,8 @@ mod server;
 
 fn main() {
     let args = App::new("rperf")
-        .about("validates network throughput capacity and reliability")
-        .author("https://3d-p.com/")
+        .about(clap::crate_description!())
+        .author("https://github.com/3d-p/rperf")
         .name(clap::crate_name!())
         .version(clap::crate_version!())
         .arg(
