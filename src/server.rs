@@ -315,7 +315,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                             
                             let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
                             if client_limit > 0 && client_count > client_limit {
-                                log::warn!("client-limit {} reached; disconnecting {}...", client_limit, address.to_string());
+                                log::warn!("client-limit ({}) reached; disconnecting {}...", client_limit, address.to_string());
                                 stream.shutdown(Shutdown::Both).unwrap_or_default();
                                 CLIENTS.fetch_sub(1, Ordering::Relaxed);
                             } else {
