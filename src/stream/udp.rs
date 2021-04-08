@@ -80,14 +80,12 @@ pub mod receiver {
     const POLL_TIMEOUT:Duration = Duration::from_millis(250);
     const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
     
-    struct UdpReceiverHistory {
+    struct UdpReceiverIntervalHistory {
         packets_received: u64,
-        
-        next_packet_id: u64,
         
         packets_lost: i64,
         packets_out_of_order: u64,
-        packets_duplicate: u64,
+        packets_duplicated: u64,
         
         unbroken_sequence: u64,
         jitter_seconds: Option<f32>,
@@ -98,7 +96,7 @@ pub mod receiver {
         active: bool,
         test_definition: super::UdpTestDefinition,
         stream_idx: u8,
-        history: UdpReceiverHistory,
+        next_packet_id: u64,
         
         socket: UdpSocket,
         mio_poll_token: Token,
@@ -132,19 +130,8 @@ pub mod receiver {
                 active: true,
                 test_definition: test_definition,
                 stream_idx: stream_idx.to_owned(),
-                history: UdpReceiverHistory{
-                    packets_received: 0,
-                    
-                    next_packet_id: 0,
-                    
-                    packets_lost: 0,
-                    packets_out_of_order: 0,
-                    packets_duplicate: 0,
-                    
-                    unbroken_sequence: 0,
-                    jitter_seconds: None,
-                    previous_time_delta_nanoseconds: 0,
-                },
+                
+                next_packet_id: 0,
                 
                 socket: socket,
                 mio_poll_token: mio_poll_token,
@@ -152,32 +139,32 @@ pub mod receiver {
             })
         }
         
-        fn process_packets_ordering(&mut self, packet_id:u64) -> bool {
+        fn process_packets_ordering(&mut self, packet_id:u64, mut history:&mut UdpReceiverIntervalHistory) -> bool {
             /* the algorithm from iperf3 provides a pretty decent approximation
              * for tracking lost and out-of-order packets efficiently, so it's
              * been minimally reimplemented here, with corrections.
              * 
              * returns true if packet-ordering is as-expected
              */
-            if packet_id == self.history.next_packet_id { //expected sequential-ordering case
-                self.history.next_packet_id += 1;
+            if packet_id == self.next_packet_id { //expected sequential-ordering case
+                self.next_packet_id += 1;
                 return true;
-            } else if packet_id > self.history.next_packet_id { //something was either lost or there's an ordering problem
-                self.history.packets_lost += (packet_id - self.history.next_packet_id) as i64; //assume everything in between has been lost
-                self.history.next_packet_id = packet_id + 1; //anticipate that ordered receipt will resume
+            } else if packet_id > self.next_packet_id { //something was either lost or there's an ordering problem
+                history.packets_lost += (packet_id - self.next_packet_id) as i64; //assume everything in-between has been lost
+                self.next_packet_id = packet_id + 1; //anticipate that ordered receipt will resume
             } else { //a packet with a previous ID was received; this is either a duplicate or an ordering issue
                 //CAUTION: this is where the approximation part of the algorithm comes into play
-                if self.history.packets_lost > 0 { //assume it's an ordering issue in the common case
-                    self.history.packets_lost -= 1;
-                    self.history.packets_out_of_order += 1;
+                if history.packets_lost > 0 { //assume it's an ordering issue in the common case
+                    history.packets_lost -= 1;
+                    history.packets_out_of_order += 1;
                 } else { //the only other thing it could be is a duplicate; in practice, duplicates don't tend to show up alongside losses; non-zero is always bad, though
-                    self.history.packets_duplicate += 1;
+                    history.packets_duplicated += 1;
                 }
             }
             return false;
         }
         
-        fn process_jitter(&mut self, timestamp:&NaiveDateTime) {
+        fn process_jitter(&mut self, timestamp:&NaiveDateTime, history:&mut UdpReceiverIntervalHistory) {
             /* this is a pretty straightforward implementation of RFC 1889, Appendix 8
              * it works on an assumption that the timestamp delta between sender and receiver
              * will remain effectively constant during the testing window
@@ -195,22 +182,22 @@ pub mod receiver {
                 },
             };
             
-            if self.history.unbroken_sequence > 1 { //do jitter calculation
-                let delta_seconds = (time_delta_nanoseconds - self.history.previous_time_delta_nanoseconds).abs() as f32 / 1_000_000_000.00;
+            if history.unbroken_sequence > 1 { //do jitter calculation
+                let delta_seconds = (time_delta_nanoseconds - history.previous_time_delta_nanoseconds).abs() as f32 / 1_000_000_000.00;
                 
-                if self.history.unbroken_sequence > 2 { //normal jitter-calculation, per the RFC
-                    let mut jitter_seconds = self.history.jitter_seconds.unwrap();
+                if history.unbroken_sequence > 2 { //normal jitter-calculation, per the RFC
+                    let mut jitter_seconds = history.jitter_seconds.unwrap(); //since we have a chain, this won't be None
                     jitter_seconds += (delta_seconds - jitter_seconds) / 16.0;
-                    self.history.jitter_seconds = Some(jitter_seconds);
+                    history.jitter_seconds = Some(jitter_seconds);
                 } else { //first observed transition; use this as the calibration baseline
-                    self.history.jitter_seconds = Some(delta_seconds);
+                    history.jitter_seconds = Some(delta_seconds);
                 }
             }
             //update time-delta
-            self.history.previous_time_delta_nanoseconds = time_delta_nanoseconds;
+            history.previous_time_delta_nanoseconds = time_delta_nanoseconds;
         }
         
-        fn process_packet(&mut self, packet:&[u8]) -> bool {
+        fn process_packet(&mut self, packet:&[u8], mut history:&mut UdpReceiverIntervalHistory) -> bool {
             //the first sixteen bytes are the test's ID
             if packet[0..16] != self.test_definition.test_id {
                 return false
@@ -221,19 +208,19 @@ pub mod receiver {
             
             //except for the timestamp, nothing else in the packet actually matters
             
-            self.history.packets_received += 1;
-            if self.process_packets_ordering(packet_id) {
+            history.packets_received += 1;
+            if self.process_packets_ordering(packet_id, &mut history) {
                 //the second eight are the number of seconds since the UNIX epoch, in big-endian order
                 let origin_seconds = i64::from_be_bytes(packet[24..32].try_into().unwrap());
                 //and the following four are the number of nanoseconds since the UNIX epoch
                 let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into().unwrap());
                 let source_timestamp = NaiveDateTime::from_timestamp(origin_seconds, origin_nanoseconds);
                 
-                self.history.unbroken_sequence += 1;
-                self.process_jitter(&source_timestamp);
+                history.unbroken_sequence += 1;
+                self.process_jitter(&source_timestamp, &mut history);
             } else {
-                self.history.unbroken_sequence = 0;
-                self.history.jitter_seconds = None;
+                history.unbroken_sequence = 0;
+                history.jitter_seconds = None;
             }
             return true;
         }
@@ -244,10 +231,18 @@ pub mod receiver {
             let mut buf = vec![0_u8; self.test_definition.length.into()];
             
             let mut bytes_received:u64 = 0;
-            let initial_packets_received = self.history.packets_received;
-            let initial_packets_lost = self.history.packets_lost;
-            let initial_packets_out_of_order = self.history.packets_out_of_order;
-            let initial_packets_duplicate = self.history.packets_duplicate;
+            
+            let mut history = UdpReceiverIntervalHistory{
+                packets_received: 0,
+                
+                packets_lost: 0,
+                packets_out_of_order: 0,
+                packets_duplicated: 0,
+                
+                unbroken_sequence: 0,
+                jitter_seconds: None,
+                previous_time_delta_nanoseconds: 0,
+            };
             
             let start = Instant::now();
             
@@ -278,7 +273,7 @@ pub mod receiver {
                                         continue
                                     }
                                     
-                                    if self.process_packet(&buf) {
+                                    if self.process_packet(&buf, &mut history) {
                                         bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
                                         
                                         let elapsed_time = start.elapsed();
@@ -291,13 +286,13 @@ pub mod receiver {
                                                 duration: elapsed_time.as_secs_f32(),
                                                 
                                                 bytes_received: bytes_received,
-                                                packets_received: self.history.packets_received - initial_packets_received,
-                                                packets_lost: self.history.packets_lost - initial_packets_lost,
-                                                packets_out_of_order: self.history.packets_out_of_order - initial_packets_out_of_order,
-                                                packets_duplicate: self.history.packets_duplicate - initial_packets_duplicate,
+                                                packets_received: history.packets_received,
+                                                packets_lost: history.packets_lost,
+                                                packets_out_of_order: history.packets_out_of_order,
+                                                packets_duplicated: history.packets_duplicated,
                                                 
-                                                unbroken_sequence: self.history.unbroken_sequence,
-                                                jitter_seconds: self.history.jitter_seconds,
+                                                unbroken_sequence: history.unbroken_sequence,
+                                                jitter_seconds: history.jitter_seconds,
                                             })))
                                         }
                                     } else {
@@ -327,13 +322,13 @@ pub mod receiver {
                     duration: start.elapsed().as_secs_f32(),
                     
                     bytes_received: bytes_received,
-                    packets_received: self.history.packets_received - initial_packets_received,
-                    packets_lost: self.history.packets_lost - initial_packets_lost,
-                    packets_out_of_order: self.history.packets_out_of_order - initial_packets_out_of_order,
-                    packets_duplicate: self.history.packets_duplicate - initial_packets_duplicate,
+                    packets_received: history.packets_received,
+                    packets_lost: history.packets_lost,
+                    packets_out_of_order: history.packets_out_of_order,
+                    packets_duplicated: history.packets_duplicated,
                     
-                    unbroken_sequence: self.history.unbroken_sequence,
-                    jitter_seconds: self.history.jitter_seconds,
+                    unbroken_sequence: history.unbroken_sequence,
+                    jitter_seconds: history.jitter_seconds,
                 })))
             } else {
                 None

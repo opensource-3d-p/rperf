@@ -310,7 +310,7 @@ pub struct UdpReceiveResult {
     pub packets_received: u64,
     pub packets_lost: i64,
     pub packets_out_of_order: u64,
-    pub packets_duplicate: u64,
+    pub packets_duplicated: u64,
     
     pub unbroken_sequence: u64,
     pub jitter_seconds: Option<f32>,
@@ -364,7 +364,7 @@ impl IntervalResult for UdpReceiveResult {
                                   packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
                                 self.duration, self.stream_idx,
                                 self.bytes_received, bytes_per_second, throughput,
-                                self.packets_received, self.packets_lost, self.packets_out_of_order, self.packets_duplicate, self.packets_received as f32 / duration_divisor,
+                                self.packets_received, self.packets_lost, self.packets_out_of_order, self.packets_duplicated, self.packets_received as f32 / duration_divisor,
         );
         if self.jitter_seconds.is_some() {
             output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", self.jitter_seconds.unwrap(), self.unbroken_sequence));
@@ -573,7 +573,7 @@ impl StreamResults for UdpStreamResults {
         let mut bytes_received:u64 = 0;
         let mut packets_received:u64 = 0;
         let mut packets_out_of_order:u64 = 0;
-        let mut packets_duplicate:u64 = 0;
+        let mut packets_duplicated:u64 = 0;
         
         let mut jitter_calculated = false;
         let mut unbroken_sequence_count:u64 = 0;
@@ -600,7 +600,7 @@ impl StreamResults for UdpStreamResults {
             bytes_received += rr.bytes_received;
             packets_received += rr.packets_received;
             packets_out_of_order += rr.packets_out_of_order;
-            packets_duplicate += rr.packets_duplicate;
+            packets_duplicated += rr.packets_duplicated;
             
             if rr.jitter_seconds.is_some() {
                 jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
@@ -623,7 +623,7 @@ impl StreamResults for UdpStreamResults {
             "packets_received": packets_received,
             "packets_lost": packets_sent - packets_received,
             "packets_out_of_order": packets_out_of_order,
-            "packets_duplicate": packets_duplicate,
+            "packets_duplicated": packets_duplicated,
         });
         if packets_sent > 0 {
             summary["framed_packet_size"] = serde_json::json!(bytes_sent / packets_sent);
@@ -950,7 +950,7 @@ impl TestResults for UdpTestResults {
         let mut bytes_received:u64 = 0;
         let mut packets_received:u64 = 0;
         let mut packets_out_of_order:u64 = 0;
-        let mut packets_duplicate:u64 = 0;
+        let mut packets_duplicated:u64 = 0;
         
         let mut jitter_calculated = false;
         let mut unbroken_sequence_count:u64 = 0;
@@ -986,7 +986,7 @@ impl TestResults for UdpTestResults {
                 bytes_received += rr.bytes_received;
                 packets_received += rr.packets_received;
                 packets_out_of_order += rr.packets_out_of_order;
-                packets_duplicate += rr.packets_duplicate;
+                packets_duplicated += rr.packets_duplicated;
                 
                 if rr.jitter_seconds.is_some() {
                     jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
@@ -1010,7 +1010,7 @@ impl TestResults for UdpTestResults {
             "packets_received": packets_received,
             "packets_lost": packets_sent - packets_received,
             "packets_out_of_order": packets_out_of_order,
-            "packets_duplicate": packets_duplicate,
+            "packets_duplicated": packets_duplicated,
         });
         if packets_sent > 0 {
             summary["framed_packet_size"] = serde_json::json!(bytes_sent / packets_sent);
@@ -1045,7 +1045,7 @@ impl TestResults for UdpTestResults {
         let mut bytes_received:u64 = 0;
         let mut packets_received:u64 = 0;
         let mut packets_out_of_order:u64 = 0;
-        let mut packets_duplicate:u64 = 0;
+        let mut packets_duplicated:u64 = 0;
         
         let mut jitter_calculated = false;
         let mut unbroken_sequence_count:u64 = 0;
@@ -1074,7 +1074,7 @@ impl TestResults for UdpTestResults {
                 bytes_received += rr.bytes_received;
                 packets_received += rr.packets_received;
                 packets_out_of_order += rr.packets_out_of_order;
-                packets_duplicate += rr.packets_duplicate;
+                packets_duplicated += rr.packets_duplicated;
                 
                 if rr.jitter_seconds.is_some() {
                     jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
@@ -1123,7 +1123,7 @@ impl TestResults for UdpTestResults {
                                 
                                 duration_receive, self.stream_results.len(),
                                 bytes_received, receive_bytes_per_second, receive_throughput,
-                                packets_received, packets_sent - packets_received, packets_out_of_order, packets_duplicate, packets_received as f64 / receive_duration_divisor,
+                                packets_received, packets_sent - packets_received, packets_out_of_order, packets_duplicated, packets_received as f64 / receive_duration_divisor,
         );
         if jitter_calculated {
             output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", jitter_weight / (unbroken_sequence_count as f64), unbroken_sequence_count));
