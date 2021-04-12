@@ -32,7 +32,7 @@ mod server;
 fn main() {
     let args = App::new("rperf")
         .about(clap::crate_description!())
-        .author("https://github.com/3d-p/rperf")
+        .author("https://github.com/opensource-3d-p/rperf")
         .name(clap::crate_name!())
         .version(clap::crate_version!())
         .arg(
