@@ -1,6 +1,6 @@
 # rperf
 
-_rperf_ is a Rust-based [_iperf_](https://github.com/esnet/iperf) clone
+_rperf_ is a Rust-based [_iperf_](https://github.com/esnet/iperf) alternative
 developed by [3D-P](https://3d-p.com/), aiming to avoid some reliability and
 consistency issues found in _iperf3_, while simultaneously providing richer
 metrics data, with a focus on operation in a loss-tolerant, more IoT-like
