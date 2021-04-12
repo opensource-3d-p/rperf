@@ -23,10 +23,10 @@ In particular, the most significant issues addressed from _iperf3_ follow:
 * _rperf_'s implementation of
   [RFC 1889](https://tools.ietf.org/html/rfc1889#appendix-A.8) for streaming
   jitter calculation starts by assuming a delta between the first and second
-  packets in a sequence, rather than beginning with 0, which creates
-  artificially low values, and gaps in a sequence trigger a reset of the count,
-  instead of continuing from the last-observed event, which conversely creates
-  artificially high values.
+  packets in a sequence and gaps in a sequence trigger a reset of the count.
+  Comparatively, _iperf3_ begins with 0, which creates artificially low values,
+  and in case of a gap, it just continues naively, which creates artificially
+  high values.
   
 * Duplicate packets are accounted for in UDP exchanges and out-of-order packets
   are counted as independent events.
