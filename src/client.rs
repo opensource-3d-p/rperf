@@ -292,7 +292,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     
     
     if is_alive() { //if interrupted while waiting for the server to respond, there's no reason to continue
-        log::info!("informing server that testing can begin");
+        log::info!("informing server that testing can begin...");
         //tell the server to start
         send(&mut stream, &prepare_begin())?;
         

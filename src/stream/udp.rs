@@ -74,10 +74,9 @@ pub mod receiver {
     
     use chrono::{NaiveDateTime};
     
-    use mio::net::UdpSocket;
-    use mio::{Events, Ready, Poll, PollOpt, Token};
+    use std::net::UdpSocket;
     
-    const POLL_TIMEOUT:Duration = Duration::from_millis(250);
+    const READ_TIMEOUT:Duration = Duration::from_millis(50);
     const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
     
     struct UdpReceiverIntervalHistory {
@@ -99,8 +98,6 @@ pub mod receiver {
         next_packet_id: u64,
         
         socket: UdpSocket,
-        mio_poll_token: Token,
-        mio_poll: Poll,
     }
     impl UdpReceiver {
         pub fn new(test_definition:super::UdpTestDefinition, stream_idx:&u8, port:&u16, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<UdpReceiver> {
@@ -109,6 +106,7 @@ pub mod receiver {
                 IpAddr::V6(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
                 IpAddr::V4(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
             };
+            socket.set_read_timeout(Some(READ_TIMEOUT))?;
             if !cfg!(windows) { //NOTE: features unsupported on Windows
                 if *receive_buffer != 0 {
                     log::debug!("setting receive-buffer to {}...", receive_buffer);
@@ -116,15 +114,6 @@ pub mod receiver {
                 }
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
-            
-            let mio_poll_token = Token(0);
-            let mio_poll = Poll::new()?;
-            mio_poll.register(
-                &socket,
-                mio_poll_token,
-                Ready::readable(),
-                PollOpt::edge(),
-            )?;
             
             Ok(UdpReceiver{
                 active: true,
@@ -134,8 +123,6 @@ pub mod receiver {
                 next_packet_id: 0,
                 
                 socket: socket,
-                mio_poll_token: mio_poll_token,
-                mio_poll: mio_poll,
             })
         }
         
@@ -227,7 +214,6 @@ pub mod receiver {
     }
     impl super::TestStream for UdpReceiver {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
-            let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = vec![0_u8; self.test_definition.length.into()];
             
             let mut bytes_received:u64 = 0;
@@ -251,66 +237,57 @@ pub mod receiver {
                     return Some(Err(Box::new(simple_error::simple_error!("UDP reception for stream {} timed out, likely because the end-signal was lost", self.stream_idx))));
                 }
                 
-                log::trace!("awaiting UDP packet on stream {}...", self.stream_idx);
-                let poll_result = self.mio_poll.poll(&mut events, Some(POLL_TIMEOUT));
-                if poll_result.is_err() {
-                    return Some(Err(Box::new(poll_result.unwrap_err())));
-                }
-                for event in events.iter() {
-                    if event.token() == self.mio_poll_token {
-                        loop {
-                            match self.socket.recv_from(&mut buf) {
-                                Ok((packet_size, peer_addr)) => {
-                                    log::trace!("received {} bytes in UDP packet {} from {}", packet_size, self.stream_idx, peer_addr);
-                                    if packet_size == 16 { //possible end-of-test message
-                                        if &buf[0..16] == self.test_definition.test_id { //test's over
-                                            self.stop();
-                                            break;
-                                        }
-                                    }
-                                    if packet_size < super::TEST_HEADER_SIZE as usize {
-                                        log::warn!("received malformed packet with size {} for UDP stream {} from {}", packet_size, self.stream_idx, peer_addr);
-                                        continue
-                                    }
-                                    
-                                    if self.process_packet(&buf, &mut history) {
-                                        //NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
-                                        bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
-                                        
-                                        let elapsed_time = start.elapsed();
-                                        if elapsed_time >= super::INTERVAL {
-                                            return Some(Ok(Box::new(super::UdpReceiveResult{
-                                                timestamp: super::get_unix_timestamp(),
-                                                
-                                                stream_idx: self.stream_idx,
-                                                
-                                                duration: elapsed_time.as_secs_f32(),
-                                                
-                                                bytes_received: bytes_received,
-                                                packets_received: history.packets_received,
-                                                packets_lost: history.packets_lost,
-                                                packets_out_of_order: history.packets_out_of_order,
-                                                packets_duplicated: history.packets_duplicated,
-                                                
-                                                unbroken_sequence: history.unbroken_sequence,
-                                                jitter_seconds: history.jitter_seconds,
-                                            })))
-                                        }
-                                    } else {
-                                        log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
-                                        continue
-                                    }
-                                },
-                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
+                log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
+                loop {
+                    match self.socket.recv_from(&mut buf) {
+                        Ok((packet_size, peer_addr)) => {
+                            log::trace!("received {} bytes in UDP packet {} from {}", packet_size, self.stream_idx, peer_addr);
+                            if packet_size == 16 { //possible end-of-test message
+                                if &buf[0..16] == self.test_definition.test_id { //test's over
+                                    self.stop();
                                     break;
-                                },
-                                Err(e) => {
-                                    return Some(Err(Box::new(e)));
-                                },
+                                }
                             }
-                        }
-                    } else {
-                        log::warn!("got event for unbound token: {:?}", event);
+                            if packet_size < super::TEST_HEADER_SIZE as usize {
+                                log::warn!("received malformed packet with size {} for UDP stream {} from {}", packet_size, self.stream_idx, peer_addr);
+                                continue;
+                            }
+                            
+                            if self.process_packet(&buf, &mut history) {
+                                //NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
+                                bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
+                                
+                                let elapsed_time = start.elapsed();
+                                if elapsed_time >= super::INTERVAL {
+                                    return Some(Ok(Box::new(super::UdpReceiveResult{
+                                        timestamp: super::get_unix_timestamp(),
+                                        
+                                        stream_idx: self.stream_idx,
+                                        
+                                        duration: elapsed_time.as_secs_f32(),
+                                        
+                                        bytes_received: bytes_received,
+                                        packets_received: history.packets_received,
+                                        packets_lost: history.packets_lost,
+                                        packets_out_of_order: history.packets_out_of_order,
+                                        packets_duplicated: history.packets_duplicated,
+                                        
+                                        unbroken_sequence: history.unbroken_sequence,
+                                        jitter_seconds: history.jitter_seconds,
+                                    })))
+                                }
+                            } else {
+                                log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
+                                continue;
+                            }
+                        },
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
+                            //break;
+                            continue;
+                        },
+                        Err(e) => {
+                            return Some(Err(Box::new(e)));
+                        },
                     }
                 }
             }
@@ -358,9 +335,11 @@ pub mod sender {
     use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
-    use mio::net::UdpSocket;
+    use std::net::UdpSocket;
     
     use std::thread::{sleep};
+    
+    const WRITE_TIMEOUT:Duration = Duration::from_millis(50);
     
     pub struct UdpSender {
         active: bool,
@@ -384,6 +363,7 @@ pub mod sender {
                 IpAddr::V6(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
                 IpAddr::V4(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
             };
+            socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             if !cfg!(windows) { //NOTE: features unsupported on Windows
                 if *send_buffer != 0 {
                     log::debug!("setting send-buffer to {}...", send_buffer);
