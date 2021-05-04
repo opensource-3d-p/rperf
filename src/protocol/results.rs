@@ -846,10 +846,10 @@ impl TestResults for TcpTestResults {
         };
         
         let mut output = format!("==========\n\
-                                  TCP send result over {:.2}s | {} streams\n\
+                                  TCP send result over {:.2}s | streams: {}\n\
                                   bytes: {} | per second: {:.3} | {}\n\
                                   ==========\n\
-                                  TCP receive result over {:.2}s | {} streams\n\
+                                  TCP receive result over {:.2}s | streams: {}\n\
                                   bytes: {} | per second: {:.3} | {}",
                                 duration_send, self.stream_results.len(),
                                 bytes_sent, send_bytes_per_second, send_throughput,
@@ -1109,21 +1109,22 @@ impl TestResults for UdpTestResults {
             false => format!("megabytes/second: {:.3}", receive_bytes_per_second / 1_000_000.00),
         };
         
+        let packets_lost = packets_sent - packets_received;
         let mut output = format!("==========\n\
-                                  UDP send result over {:.2}s | {} streams\n\
+                                  UDP send result over {:.2}s | streams: {}\n\
                                   bytes: {} | per second: {:.3} | {}\n\
                                   packets: {} per second: {:.3}\n\
                                   ==========\n\
-                                  UDP receive result over {:.2}s | {} streams\n\
+                                  UDP receive result over {:.2}s | streams: {}\n\
                                   bytes: {} | per second: {:.3} | {}\n\
-                                  packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
+                                  packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
                                 duration_send, self.stream_results.len(),
                                 bytes_sent, send_bytes_per_second, send_throughput,
                                 packets_sent, packets_sent as f64 / send_duration_divisor,
                                 
                                 duration_receive, self.stream_results.len(),
                                 bytes_received, receive_bytes_per_second, receive_throughput,
-                                packets_received, packets_sent - packets_received, packets_out_of_order, packets_duplicated, packets_received as f64 / receive_duration_divisor,
+                                packets_received, packets_lost, (packets_lost as f64 / packets_sent as f64) * 100.0, packets_out_of_order, packets_duplicated, packets_received as f64 / receive_duration_divisor,
         );
         if jitter_calculated {
             output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", jitter_weight / (unbroken_sequence_count as f64), unbroken_sequence_count));
