@@ -282,8 +282,7 @@ pub mod receiver {
                             }
                         },
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
-                            //break;
-                            continue;
+                            break;
                         },
                         Err(e) => {
                             return Some(Err(Box::new(e)));

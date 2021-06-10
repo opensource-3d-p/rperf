@@ -133,7 +133,13 @@ pub mod receiver {
             )?;
             let mut events = Events::with_capacity(1);
             
+            let start = Instant::now();
+            
             while self.active {
+                if start.elapsed() >= RECEIVE_TIMEOUT {
+                    return Err(Box::new(simple_error::simple_error!("TCP listening for stream {} timed out", self.stream_idx)));
+                }
+                
                 poll.poll(&mut events, Some(POLL_TIMEOUT))?;
                 for event in events.iter() {
                     match event.token() {
