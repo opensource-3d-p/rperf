@@ -225,6 +225,7 @@ fn main() {
         let service = server::serve(args);
         if service.is_err() {
             log::error!("unable to run server: {}", service.unwrap_err());
+            std::process::exit(4);
         }
     } else if args.is_present("client") {
         log::debug!("registering SIGINT handler...");
@@ -241,6 +242,7 @@ fn main() {
         let execution = client::execute(args);
         if execution.is_err() {
             log::error!("unable to run client: {}", execution.unwrap_err());
+            std::process::exit(4);
         }
     } else {
         std::println!("{}", args.usage());
