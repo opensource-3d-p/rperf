@@ -213,7 +213,7 @@ impl IntervalResult for TcpReceiveResult {
     
     fn to_string(&self, bit:bool) -> String {
         let duration_divisor;
-        if self.duration == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if self.duration == 0.0 { //avoid zerodiv, which can happen if the stream fails
             duration_divisor = 1.0;
         } else {
             duration_divisor = self.duration;
@@ -275,7 +275,7 @@ impl IntervalResult for TcpSendResult {
     
     fn to_string(&self, bit:bool) -> String {
         let duration_divisor;
-        if self.duration == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if self.duration == 0.0 { //avoid zerodiv, which can happen if the stream fails
             duration_divisor = 1.0;
         } else {
             duration_divisor = self.duration;
@@ -345,7 +345,7 @@ impl IntervalResult for UdpReceiveResult {
     
     fn to_string(&self, bit:bool) -> String {
         let duration_divisor;
-        if self.duration == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if self.duration == 0.0 { //avoid zerodiv, which can happen if the stream fails
             duration_divisor = 1.0;
         } else {
             duration_divisor = self.duration;
@@ -414,7 +414,7 @@ impl IntervalResult for UdpSendResult {
     
     fn to_string(&self, bit:bool) -> String {
         let duration_divisor;
-        if self.duration == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if self.duration == 0.0 { //avoid zerodiv, which can happen if the stream fails
             duration_divisor = 1.0;
         } else {
             duration_divisor = self.duration;
@@ -822,7 +822,7 @@ impl TestResults for TcpTestResults {
         }
         
         let send_duration_divisor;
-        if duration_send == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if duration_send == 0.0 { //avoid zerodiv, which can happen if all streams fail
             send_duration_divisor = 1.0;
         } else {
             send_duration_divisor = duration_send;
@@ -834,7 +834,7 @@ impl TestResults for TcpTestResults {
         };
         
         let receive_duration_divisor;
-        if duration_receive == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if duration_receive == 0.0 { //avoid zerodiv, which can happen if all streams fail
             receive_duration_divisor = 1.0;
         } else {
             receive_duration_divisor = duration_receive;
@@ -1086,7 +1086,7 @@ impl TestResults for UdpTestResults {
         }
         
         let send_duration_divisor;
-        if duration_send == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if duration_send == 0.0 { //avoid zerodiv, which can happen if all streams fail
             send_duration_divisor = 1.0;
         } else {
             send_duration_divisor = duration_send;
@@ -1098,7 +1098,7 @@ impl TestResults for UdpTestResults {
         };
         
         let receive_duration_divisor;
-        if duration_receive == 0.0 { //avoid zerodiv, which should be impossible, but safety
+        if duration_receive == 0.0 { //avoid zerodiv, which can happen if all streams fail
             receive_duration_divisor = 1.0;
         } else {
             receive_duration_divisor = duration_receive;
@@ -1110,6 +1110,12 @@ impl TestResults for UdpTestResults {
         };
         
         let packets_lost = packets_sent - packets_received;
+        let packets_sent_divisor;
+        if packets_sent == 0 { //avoid zerodiv, which can happen if all streams fail
+            packets_sent_divisor = 1.0
+        } else {
+            packets_sent_divisor = packets_sent as f64;
+        }
         let mut output = format!("==========\n\
                                   UDP send result over {:.2}s | streams: {}\n\
                                   bytes: {} | per second: {:.3} | {}\n\
@@ -1124,7 +1130,7 @@ impl TestResults for UdpTestResults {
                                 
                                 duration_receive, self.stream_results.len(),
                                 bytes_received, receive_bytes_per_second, receive_throughput,
-                                packets_received, packets_lost, (packets_lost as f64 / packets_sent as f64) * 100.0, packets_out_of_order, packets_duplicated, packets_received as f64 / receive_duration_divisor,
+                                packets_received, packets_lost, (packets_lost as f64 / packets_sent_divisor) * 100.0, packets_out_of_order, packets_duplicated, packets_received as f64 / receive_duration_divisor,
         );
         if jitter_calculated {
             output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", jitter_weight / (unbroken_sequence_count as f64), unbroken_sequence_count));
