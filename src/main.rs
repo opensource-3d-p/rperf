@@ -186,7 +186,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("omit")
-                .help("omit a number of seconds from the start of calculations, primarily to avoid including TCP ramp-up in averages")
+                .help("omit a number of seconds from the start of calculations, primarily to avoid including TCP ramp-up in averages; using this option may result in disagreement between bytes sent and received, since data can be in-flight across time-boundaries")
                 .takes_value(true)
                 .long("omit")
                 .short("O")
