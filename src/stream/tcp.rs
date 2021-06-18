@@ -334,6 +334,7 @@ pub mod sender {
     
     const CONNECT_TIMEOUT:Duration = Duration::from_secs(2);
     const WRITE_TIMEOUT:Duration = Duration::from_millis(50);
+    const BUFFER_FULL_TIMEOUT:Duration = Duration::from_millis(1);
     
     pub struct TcpSender {
         active: bool,
@@ -464,8 +465,8 @@ pub mod sender {
                         }
                     },
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
-                        //nothing to do
-                        sleep(Duration::from_millis(5));
+                        //nothing to do, but avoid burning CPU cycles
+                        sleep(BUFFER_FULL_TIMEOUT);
                     },
                     Err(e) => {
                         return Some(Err(Box::new(e)));

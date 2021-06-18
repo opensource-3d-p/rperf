@@ -339,6 +339,7 @@ pub mod sender {
     use std::thread::{sleep};
     
     const WRITE_TIMEOUT:Duration = Duration::from_millis(50);
+    const BUFFER_FULL_TIMEOUT:Duration = Duration::from_millis(1);
     
     pub struct UdpSender {
         active: bool,
@@ -454,7 +455,8 @@ pub mod sender {
                         }
                     },
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
-                        //nothing to do
+                        //nothing to do, but avoid burning CPU cycles
+                        sleep(BUFFER_FULL_TIMEOUT);
                     },
                     Err(e) => {
                         return Some(Err(Box::new(e)));
