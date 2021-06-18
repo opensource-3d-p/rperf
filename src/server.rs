@@ -86,7 +86,7 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                 match kind.as_str().unwrap() {
                     "configuration" => { //we either need to connect streams to the client or prepare to receive connections
                         if payload.get("role").unwrap_or(&serde_json::json!("download")).as_str().unwrap() == "download" {
-                            log::debug!("[{}] running in forward-mode: server will be receiving data", &peer_addr);
+                            log::info!("[{}] running in forward-mode: server will be receiving data", &peer_addr);
                             
                             let stream_count = payload.get("streams").unwrap_or(&serde_json::json!(1)).as_i64().unwrap();
                             //since we're receiving data, we're also responsible for letting the client know where to send it
@@ -127,7 +127,7 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                             //let the client know we're ready to receive the connection; stream-ports are in stream-index order
                             send(stream, &prepare_connect(&stream_ports))?;
                         } else { //upload
-                            log::debug!("[{}] running in reverse-mode: server will be uploading data", &peer_addr);
+                            log::info!("[{}] running in reverse-mode: server will be uploading data", &peer_addr);
                             
                             let stream_ports = payload.get("stream_ports").unwrap().as_array().unwrap();
                             
