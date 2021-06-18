@@ -333,6 +333,7 @@ pub mod sender {
     use std::thread::{sleep};
     
     const CONNECT_TIMEOUT:Duration = Duration::from_secs(2);
+    const WRITE_TIMEOUT:Duration = Duration::from_millis(50);
     
     pub struct TcpSender {
         active: bool,
@@ -385,6 +386,7 @@ pub mod sender {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect stream {}: {}", self.stream_idx, e))),
             };
+            raw_stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
             let stream = match TcpStream::from_stream(raw_stream) {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP stream {}: {}", self.stream_idx, e))),
