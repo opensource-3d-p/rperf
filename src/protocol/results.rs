@@ -794,6 +794,8 @@ impl TestResults for TcpTestResults {
     }
     
     fn to_string(&self, bit:bool, omit_seconds:usize) -> String {
+        let stream_count = self.stream_results.len();
+        
         let mut duration_send:f64 = 0.0;
         let mut bytes_sent:u64 = 0;
         
@@ -832,6 +834,10 @@ impl TestResults for TcpTestResults {
             true => format!("megabits/second: {:.3}", send_bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", send_bytes_per_second / 1_000_000.00),
         };
+        let total_send_throughput = match bit {
+            true => format!("megabits/second: {:.3}", (send_bytes_per_second / (1_000_000.00 / 8.0)) * stream_count as f64),
+            false => format!("megabytes/second: {:.3}", (send_bytes_per_second / 1_000_000.00) * stream_count as f64),
+        };
         
         let receive_duration_divisor;
         if duration_receive == 0.0 { //avoid zerodiv, which can happen if all streams fail
@@ -844,18 +850,26 @@ impl TestResults for TcpTestResults {
             true => format!("megabits/second: {:.3}", receive_bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", receive_bytes_per_second / 1_000_000.00),
         };
+        let total_receive_throughput = match bit {
+            true => format!("megabits/second: {:.3}", (receive_bytes_per_second / (1_000_000.00 / 8.0)) * stream_count as f64),
+            false => format!("megabytes/second: {:.3}", (receive_bytes_per_second / 1_000_000.00) * stream_count as f64),
+        };
         
         let mut output = format!("==========\n\
                                   TCP send result over {:.2}s | streams: {}\n\
-                                  bytes: {} | per second: {:.3} | {}\n\
+                                  stream-average bytes per second: {:.3} | {}\n\
+                                  total bytes: {} | per second: {:.3} | {}\n\
                                   ==========\n\
                                   TCP receive result over {:.2}s | streams: {}\n\
-                                  bytes: {} | per second: {:.3} | {}",
-                                duration_send, self.stream_results.len(),
-                                bytes_sent, send_bytes_per_second, send_throughput,
+                                  stream-average bytes per second: {:.3} | {}\n\
+                                  total bytes: {} | per second: {:.3} | {}",
+                                duration_send, stream_count,
+                                send_bytes_per_second, send_throughput,
+                                bytes_sent, send_bytes_per_second * stream_count as f64, total_send_throughput,
                                 
-                                duration_receive, self.stream_results.len(),
-                                bytes_received, receive_bytes_per_second, receive_throughput,
+                                duration_receive, stream_count,
+                                receive_bytes_per_second, receive_throughput,
+                                bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
         );
         if !self.is_success() {
             output.push_str(&format!("\nTESTING DID NOT COMPLETE SUCCESSFULLY"));
@@ -1034,6 +1048,8 @@ impl TestResults for UdpTestResults {
     }
     
     fn to_string(&self, bit:bool, omit_seconds:usize) -> String {
+        let stream_count = self.stream_results.len();
+        
         let mut duration_send:f64 = 0.0;
         
         let mut bytes_sent:u64 = 0;
@@ -1096,6 +1112,10 @@ impl TestResults for UdpTestResults {
             true => format!("megabits/second: {:.3}", send_bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", send_bytes_per_second / 1_000_000.00),
         };
+        let total_send_throughput = match bit {
+            true => format!("megabits/second: {:.3}", (send_bytes_per_second / (1_000_000.00 / 8.0)) * stream_count as f64),
+            false => format!("megabytes/second: {:.3}", (send_bytes_per_second / 1_000_000.00) * stream_count as f64),
+        };
         
         let receive_duration_divisor;
         if duration_receive == 0.0 { //avoid zerodiv, which can happen if all streams fail
@@ -1108,6 +1128,10 @@ impl TestResults for UdpTestResults {
             true => format!("megabits/second: {:.3}", receive_bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", receive_bytes_per_second / 1_000_000.00),
         };
+        let total_receive_throughput = match bit {
+            true => format!("megabits/second: {:.3}", (receive_bytes_per_second / (1_000_000.00 / 8.0)) * stream_count as f64),
+            false => format!("megabytes/second: {:.3}", (receive_bytes_per_second / 1_000_000.00) * stream_count as f64),
+        };
         
         let packets_lost = packets_sent - packets_received;
         let packets_sent_divisor;
@@ -1118,19 +1142,23 @@ impl TestResults for UdpTestResults {
         }
         let mut output = format!("==========\n\
                                   UDP send result over {:.2}s | streams: {}\n\
-                                  bytes: {} | per second: {:.3} | {}\n\
+                                  stream-average bytes per second: {:.3} | {}\n\
+                                  total bytes: {} | per second: {:.3} | {}\n\
                                   packets: {} per second: {:.3}\n\
                                   ==========\n\
                                   UDP receive result over {:.2}s | streams: {}\n\
-                                  bytes: {} | per second: {:.3} | {}\n\
+                                  stream-average bytes per second: {:.3} | {}\n\
+                                  total bytes: {} | per second: {:.3} | {}\n\
                                   packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
-                                duration_send, self.stream_results.len(),
-                                bytes_sent, send_bytes_per_second, send_throughput,
-                                packets_sent, packets_sent as f64 / send_duration_divisor,
+                                duration_send, stream_count,
+                                send_bytes_per_second, send_throughput,
+                                bytes_sent, send_bytes_per_second * stream_count as f64, total_send_throughput,
+                                packets_sent, (packets_sent as f64 / send_duration_divisor) * stream_count as f64,
                                 
-                                duration_receive, self.stream_results.len(),
-                                bytes_received, receive_bytes_per_second, receive_throughput,
-                                packets_received, packets_lost, (packets_lost as f64 / packets_sent_divisor) * 100.0, packets_out_of_order, packets_duplicated, packets_received as f64 / receive_duration_divisor,
+                                duration_receive, stream_count,
+                                receive_bytes_per_second, receive_throughput,
+                                bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
+                                packets_received, packets_lost, (packets_lost as f64 / packets_sent_divisor) * 100.0, packets_out_of_order, packets_duplicated, (packets_received as f64 / receive_duration_divisor) * stream_count as f64,
         );
         if jitter_calculated {
             output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", jitter_weight / (unbroken_sequence_count as f64), unbroken_sequence_count));

@@ -1,6 +1,6 @@
 [package]
 name = "rperf"
-version = "0.1.2"
+version = "0.1.3"
 description = "validates network throughput capacity and reliability"
 authors = ["Neil Tallim <neiltallim@3d-p.com>"]
 edition = "2018"
