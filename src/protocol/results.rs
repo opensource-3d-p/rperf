@@ -795,6 +795,8 @@ impl TestResults for TcpTestResults {
     
     fn to_string(&self, bit:bool, omit_seconds:usize) -> String {
         let stream_count = self.stream_results.len();
+        let mut stream_send_durations = vec![0.0; stream_count];
+        let mut stream_receive_durations = vec![0.0; stream_count];
         
         let mut duration_send:f64 = 0.0;
         let mut bytes_sent:u64 = 0;
@@ -803,13 +805,15 @@ impl TestResults for TcpTestResults {
         let mut bytes_received:u64 = 0;
         
         
-        for stream in self.stream_results.values() {
+        for (stream_idx, stream) in self.stream_results.values().enumerate() {
             for (i, sr) in stream.send_results.iter().enumerate() {
                 if i < omit_seconds {
                     continue;
                 }
                 
                 duration_send += sr.duration as f64;
+                stream_send_durations[stream_idx] += sr.duration as f64;
+                
                 bytes_sent += sr.bytes_sent;
             }
             
@@ -819,9 +823,13 @@ impl TestResults for TcpTestResults {
                 }
                 
                 duration_receive += rr.duration as f64;
+                stream_receive_durations[stream_idx] += rr.duration as f64;
+                
                 bytes_received += rr.bytes_received;
             }
         }
+        stream_send_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        stream_receive_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
         
         let send_duration_divisor;
         if duration_send == 0.0 { //avoid zerodiv, which can happen if all streams fail
@@ -863,11 +871,11 @@ impl TestResults for TcpTestResults {
                                   TCP receive result over {:.2}s | streams: {}\n\
                                   stream-average bytes per second: {:.3} | {}\n\
                                   total bytes: {} | per second: {:.3} | {}",
-                                duration_send, stream_count,
+                                stream_send_durations[stream_send_durations.len() - 1], stream_count,
                                 send_bytes_per_second, send_throughput,
                                 bytes_sent, send_bytes_per_second * stream_count as f64, total_send_throughput,
                                 
-                                duration_receive, stream_count,
+                                stream_receive_durations[stream_receive_durations.len() - 1], stream_count,
                                 receive_bytes_per_second, receive_throughput,
                                 bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
         );
@@ -1049,6 +1057,8 @@ impl TestResults for UdpTestResults {
     
     fn to_string(&self, bit:bool, omit_seconds:usize) -> String {
         let stream_count = self.stream_results.len();
+        let mut stream_send_durations = vec![0.0; stream_count];
+        let mut stream_receive_durations = vec![0.0; stream_count];
         
         let mut duration_send:f64 = 0.0;
         
@@ -1068,13 +1078,14 @@ impl TestResults for UdpTestResults {
         let mut jitter_weight:f64 = 0.0;
         
         
-        for stream in self.stream_results.values() {
+        for (stream_idx, stream) in self.stream_results.values().enumerate() {
             for (i, sr) in stream.send_results.iter().enumerate() {
                 if i < omit_seconds {
                     continue;
                 }
                 
                 duration_send += sr.duration as f64;
+                stream_send_durations[stream_idx] += sr.duration as f64;
                 
                 bytes_sent += sr.bytes_sent;
                 packets_sent += sr.packets_sent;
@@ -1086,6 +1097,7 @@ impl TestResults for UdpTestResults {
                 }
                 
                 duration_receive += rr.duration as f64;
+                stream_receive_durations[stream_idx] += rr.duration as f64;
                 
                 bytes_received += rr.bytes_received;
                 packets_received += rr.packets_received;
@@ -1100,6 +1112,8 @@ impl TestResults for UdpTestResults {
                 }
             }
         }
+        stream_send_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        stream_receive_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
         
         let send_duration_divisor;
         if duration_send == 0.0 { //avoid zerodiv, which can happen if all streams fail
@@ -1150,12 +1164,12 @@ impl TestResults for UdpTestResults {
                                   stream-average bytes per second: {:.3} | {}\n\
                                   total bytes: {} | per second: {:.3} | {}\n\
                                   packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
-                                duration_send, stream_count,
+                                stream_send_durations[stream_send_durations.len() - 1], stream_count,
                                 send_bytes_per_second, send_throughput,
                                 bytes_sent, send_bytes_per_second * stream_count as f64, total_send_throughput,
                                 packets_sent, (packets_sent as f64 / send_duration_divisor) * stream_count as f64,
                                 
-                                duration_receive, stream_count,
+                                stream_receive_durations[stream_receive_durations.len() - 1], stream_count,
                                 receive_bytes_per_second, receive_throughput,
                                 bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
                                 packets_received, packets_lost, (packets_lost as f64 / packets_sent_divisor) * 100.0, packets_out_of_order, packets_duplicated, (packets_received as f64 / receive_duration_divisor) * stream_count as f64,
