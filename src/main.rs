@@ -42,7 +42,7 @@ fn main() {
                 .long("port")
                 .short("p")
                 .required(false)
-                .default_value("5201")
+                .default_value("5199")
         )
         
         .arg(
