@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
- 
+
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1147,7 +1147,7 @@ impl TestResults for UdpTestResults {
             false => format!("megabytes/second: {:.3}", (receive_bytes_per_second / 1_000_000.00) * stream_count as f64),
         };
         
-        let packets_lost = packets_sent - packets_received;
+        let packets_lost = packets_sent - (packets_received - packets_duplicated);
         let packets_sent_divisor;
         if packets_sent == 0 { //avoid zerodiv, which can happen if all streams fail
             packets_sent_divisor = 1.0
