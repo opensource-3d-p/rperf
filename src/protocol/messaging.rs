@@ -189,22 +189,22 @@ pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -
         Some(v) => {
             match v {
                 'k' => { //kilobits
-                    bandwidth_multiplier = 1024.0 / 8.0;
+                    bandwidth_multiplier = 1000.0 / 8.0;
                 },
                 'K' => { //kilobytes
-                    bandwidth_multiplier = 1024.0;
+                    bandwidth_multiplier = 1000.0;
                 },
                 'm' => { //megabits
-                    bandwidth_multiplier = 1024.0 * 1024.0 / 8.0;
+                    bandwidth_multiplier = 1000.0 * 1000.0 / 8.0;
                 },
                 'M' => { //megabytes
-                    bandwidth_multiplier = 1024.0 * 1024.0;
+                    bandwidth_multiplier = 1000.0 * 1000.0;
                 },
                 'g' => { //gigabits
-                    bandwidth_multiplier = 1024.0 * 1024.0 * 1024.0 / 8.0;
+                    bandwidth_multiplier = 1000.0 * 1000.0 * 1000.0 / 8.0;
                 },
                 'G' => { //gigabytes
-                    bandwidth_multiplier = 1024.0 * 1024.0 * 1024.0;
+                    bandwidth_multiplier = 1000.0 * 1000.0 * 1000.0;
                 },
                 _ => {
                     bandwidth_multiplier = 1.0;
