@@ -126,7 +126,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("bandwidth")
-                .help("target bandwidth in bytes/sec; this value is applied to each stream, with a default target of 1 megabit/second for all protocols (note: megabit, not mebibit)")
+                .help("target bandwidth in bytes/sec; this value is applied to each stream, with a default target of 1 megabit/second for all protocols (note: megabit, not mebibit); the suffixes kKmMgG can also be used for xbit and xbyte, respectively")
                 .takes_value(true)
                 .long("bandwidth")
                 .short("b")

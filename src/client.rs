@@ -348,7 +348,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     match payload.get("kind") {
                         Some(kind) => {
                             match kind.as_str().unwrap_or_default() {
-                                "receive" | "send" => { //receive-results from the server
+                                "receive" | "send" => { //receive/send-results from the server
                                     if !display_json {
                                         let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
                                         println!("{}", result.to_string(display_bit));

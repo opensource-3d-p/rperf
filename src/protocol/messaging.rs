@@ -176,12 +176,60 @@ fn calculate_length_udp(length:u16) -> u16 {
 /// prepares a message used to describe the upload role in a test
 pub fn prepare_upload_configuration(args:&clap::ArgMatches, test_id:&[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams:u8 = args.value_of("parallel").unwrap().parse()?;
-    let bandwidth:u64 = args.value_of("bandwidth").unwrap().parse()?;
     let mut seconds:f32 = args.value_of("time").unwrap().parse()?;
     let mut send_interval:f32 = args.value_of("send_interval").unwrap().parse()?;
     let mut length:u32 = args.value_of("length").unwrap().parse()?;
     
     let mut send_buffer:u32 = args.value_of("send_buffer").unwrap().parse()?;
+    
+    let mut bandwidth_string = args.value_of("bandwidth").unwrap();
+    let bandwidth:u64;
+    let bandwidth_multiplier:f64;
+    match bandwidth_string.chars().last() {
+        Some(v) => {
+            match v {
+                'k' => { //kilobits
+                    bandwidth_multiplier = 1024.0 / 8.0;
+                },
+                'K' => { //kilobytes
+                    bandwidth_multiplier = 1024.0;
+                },
+                'm' => { //megabits
+                    bandwidth_multiplier = 1024.0 * 1024.0 / 8.0;
+                },
+                'M' => { //megabytes
+                    bandwidth_multiplier = 1024.0 * 1024.0;
+                },
+                'g' => { //gigabits
+                    bandwidth_multiplier = 1024.0 * 1024.0 * 1024.0 / 8.0;
+                },
+                'G' => { //gigabytes
+                    bandwidth_multiplier = 1024.0 * 1024.0 * 1024.0;
+                },
+                _ => {
+                    bandwidth_multiplier = 1.0;
+                },
+            }
+            
+            if bandwidth_multiplier != 1.0 { //the value uses a suffix
+                bandwidth_string = &bandwidth_string[0..(bandwidth_string.len() - 1)]; 
+            }
+            
+            match bandwidth_string.parse::<f64>() {
+                Ok(v2) => {
+                    bandwidth = (v2 * bandwidth_multiplier) as u64;
+                },
+                Err(_) => { //invalid input; fall back to 1mbps
+                    log::warn!("invalid bandwidth: {}; setting value to 1mbps", args.value_of("bandwidth").unwrap());
+                    bandwidth = 125000;
+                },
+            }
+        },
+        None => { //invalid input; fall back to 1mbps
+            log::warn!("invalid bandwidth: {}; setting value to 1mbps", args.value_of("bandwidth").unwrap());
+            bandwidth = 125000;
+        },
+    }
     
     if seconds <= 0.0 {
         log::warn!("time was not in an acceptable range and has been set to 0.0");
