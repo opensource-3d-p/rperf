@@ -19,7 +19,7 @@
  */
 
 use std::net::{IpAddr, Shutdown, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
 use std::thread;
@@ -47,9 +47,10 @@ type BoxResult<T> = Result<T,Box<dyn Error>>;
 
 /// when false, the system is shutting down
 static ALIVE:AtomicBool = AtomicBool::new(true);
+
 /// a deferred kill-switch to handle shutdowns a bit more gracefully in the event of a probable disconnect
-static KILL_TIMER:AtomicU64 = AtomicU64::new(0);
-const KILL_TIMEOUT:u64 = 5; //once testing finishes, allow a few seconds for the server to respond
+static mut KILL_TIMER_RELATIVE_START_TIME:f64 = 0.0; //the time at which the kill-timer was started
+const KILL_TIMEOUT:f64 = 5.0; //once testing finishes, allow a few seconds for the server to respond
 
 const CONNECT_TIMEOUT:Duration = Duration::from_secs(2);
 
@@ -166,7 +167,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                                 
                                 if tr.count_in_progress_streams_server() > 0 {
                                     log::info!("giving the server a few seconds to report results...");
-                                    start_kill_timer(KILL_TIMEOUT);
+                                    start_kill_timer();
                                 } else { //all data gathered from both sides
                                     kill();
                                 }
@@ -483,14 +484,17 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
 pub fn kill() -> bool {
     ALIVE.swap(false, Ordering::Relaxed)
 }
-fn start_kill_timer(timeout:u64) {
-    KILL_TIMER.swap(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() + timeout, Ordering::Relaxed);
+fn start_kill_timer() {
+    unsafe {
+        KILL_TIMER_RELATIVE_START_TIME = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+    }
 }
 fn is_alive() -> bool {
-    let kill_timer = KILL_TIMER.load(Ordering::Relaxed);
-    if kill_timer != 0 { //initialised
-        if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() >= kill_timer {
-            return false;
+    unsafe {
+        if KILL_TIMER_RELATIVE_START_TIME != 0.0 { //initialised
+            if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64() - KILL_TIMER_RELATIVE_START_TIME >= KILL_TIMEOUT {
+                return false;
+            }
         }
     }
     ALIVE.load(Ordering::Relaxed)
