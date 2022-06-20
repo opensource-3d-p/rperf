@@ -201,6 +201,38 @@ fn main() {
                 .short("N")
                 .required(false)
         )
+        .arg(
+            Arg::with_name("tcp_port_pool")
+                .help("an optional pool of IPv4 TCP ports over which data will be accepted; if omitted, any OS-assignable port is used; format: 1-10,19,21")
+                .takes_value(true)
+                .long("tcp-port-pool")
+                .required(false)
+                .default_value("")
+        )
+        .arg(
+            Arg::with_name("tcp6_port_pool")
+                .help("an optional pool of IPv6 TCP ports over which data will be accepted; if omitted, any OS-assignable port is used; format: 1-10,19,21")
+                .takes_value(true)
+                .long("tcp6-port-pool")
+                .required(false)
+                .default_value("")
+        )
+        .arg(
+            Arg::with_name("udp_port_pool")
+                .help("an optional pool of IPv4 UDP ports over which data will be accepted; if omitted, any OS-assignable port is used; format: 1-10,19,21")
+                .takes_value(true)
+                .long("udp-port-pool")
+                .required(false)
+                .default_value("")
+        )
+        .arg(
+            Arg::with_name("udp6_port_pool")
+                .help("an optional pool of IPv6 UDP ports over which data will be accepted; if omitted, any OS-assignable port is used; format: 1-10,19,21")
+                .takes_value(true)
+                .long("udp6-port-pool")
+                .required(false)
+                .default_value("")
+        )
     .get_matches();
     
     let mut env = env_logger::Env::default()

@@ -1,6 +1,6 @@
 [package]
 name = "rperf"
-version = "0.1.5"
+version = "0.1.6"
 description = "validates network throughput capacity and reliability"
 authors = ["Neil Tallim <neiltallim@3d-p.com>"]
 edition = "2018"
@@ -29,7 +29,7 @@ uuid = {version = "0.8", features = ["v4"]}
 #then "cargo deb" to build simple Debian packages for this project
 [package.metadata.deb]
 maintainer-scripts = "debian-maintainer-scripts/"
-copyright = "(C) 2021 Evtech Solutions, Ltd., dba 3D-P"
+copyright = "(C) 2022 Evtech Solutions, Ltd., dba 3D-P"
 license-file = ["COPYING", "0"]
 extended-description = """
 Rust-based iperf clone with a number of behavioural fixes and corrections, plus

@@ -39,3 +39,26 @@ pub trait TestStream {
     /// stops a running test
     fn stop(&mut self);
 }
+
+fn parse_port_spec(port_spec:String) -> Vec<u16> {
+    let mut ports = Vec::<u16>::new();
+    if !port_spec.is_empty() {
+        for range in port_spec.split(',') {
+            if range.contains('-') {
+                let mut range_spec = range.split('-');
+                let range_first = range_spec.next().unwrap().parse::<u16>().unwrap();
+                let range_last = range_spec.last().unwrap().parse::<u16>().unwrap();
+                
+                for port in range_first..=range_last {
+                    ports.push(port);
+                }
+            } else {
+                ports.push(range.parse::<u16>().unwrap());
+            }
+        }
+        
+        ports.sort();
+    }
+    
+    return ports;
+}

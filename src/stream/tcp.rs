@@ -17,14 +17,14 @@
  * You should have received a copy of the GNU General Public License
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
- 
+
 extern crate nix;
 
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
 use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult, get_unix_timestamp};
 
-use super::{INTERVAL, TestStream};
+use super::{INTERVAL, TestStream, parse_port_spec};
 
 use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
@@ -68,6 +68,7 @@ pub mod receiver {
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::unix::io::AsRawFd;
+    use std::sync::{Mutex};
     use std::time::{Duration, Instant};
     
     use mio::net::{TcpListener, TcpStream};
@@ -75,6 +76,101 @@ pub mod receiver {
     
     const POLL_TIMEOUT:Duration = Duration::from_millis(250);
     const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
+    
+    pub struct TcpPortPool {
+        pub ports_ip4: Vec<u16>,
+        pub ports_ip6: Vec<u16>,
+        pos_ip4: usize,
+        pos_ip6: usize,
+        lock_ip4: Mutex<u8>,
+        lock_ip6: Mutex<u8>,
+    }
+    impl TcpPortPool {
+        pub fn new(port_spec:String, port_spec6:String) -> TcpPortPool {
+            let ports = super::parse_port_spec(port_spec);
+            if !ports.is_empty() {
+                log::debug!("configured IPv4 TCP port pool: {:?}", ports);
+            } else {
+                log::debug!("using OS assignment for IPv4 TCP ports");
+            }
+            
+            let ports6 = super::parse_port_spec(port_spec6);
+            if !ports.is_empty() {
+                log::debug!("configured IPv6 TCP port pool: {:?}", ports6);
+            } else {
+                log::debug!("using OS assignment for IPv6 TCP ports");
+            }
+            
+            TcpPortPool {
+                ports_ip4: ports,
+                pos_ip4: 0,
+                lock_ip4: Mutex::new(0),
+                
+                ports_ip6: ports6,
+                pos_ip6: 0,
+                lock_ip6: Mutex::new(0),
+            }
+        }
+        
+        pub fn bind(&mut self, peer_ip:&IpAddr) -> super::BoxResult<TcpListener> {
+            match peer_ip {
+                IpAddr::V6(_) => {
+                    if self.ports_ip6.is_empty() {
+                        return Ok(TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)).expect(format!("failed to bind OS-assigned IPv6 TCP socket").as_str()));
+                    } else {
+                        let _guard = self.lock_ip6.lock().unwrap();
+                        
+                        for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() { //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
+                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            if listener_result.is_ok() {
+                                self.pos_ip6 = port_idx;
+                                return Ok(listener_result.unwrap());
+                            } else {
+                                log::warn!("unable to bind IPv6 TCP port {}", self.ports_ip6[port_idx]);
+                            }
+                        }
+                        for port_idx in 0..=self.pos_ip6 { //circle back to where the search started
+                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            if listener_result.is_ok() {
+                                self.pos_ip6 = port_idx;
+                                return Ok(listener_result.unwrap());
+                            } else {
+                                log::warn!("unable to bind IPv6 TCP port {}", self.ports_ip6[port_idx]);
+                            }
+                        }
+                    }
+                    return Err(Box::new(simple_error::simple_error!("unable to allocate IPv6 TCP port")));
+                },
+                IpAddr::V4(_) => {
+                    if self.ports_ip4.is_empty() {
+                        return Ok(TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).expect(format!("failed to bind OS-assigned IPv4 TCP socket").as_str()));
+                    } else {
+                        let _guard = self.lock_ip4.lock().unwrap();
+                        
+                        for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() { //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
+                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            if listener_result.is_ok() {
+                                self.pos_ip4 = port_idx;
+                                return Ok(listener_result.unwrap());
+                            } else {
+                                log::warn!("unable to bind IPv4 TCP port {}", self.ports_ip4[port_idx]);
+                            }
+                        }
+                        for port_idx in 0..=self.pos_ip4 { //circle back to where the search started
+                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            if listener_result.is_ok() {
+                                self.pos_ip4 = port_idx;
+                                return Ok(listener_result.unwrap());
+                            } else {
+                                log::warn!("unable to bind IPv4 TCP port {}", self.ports_ip4[port_idx]);
+                            }
+                        }
+                    }
+                    return Err(Box::new(simple_error::simple_error!("unable to allocate IPv4 TCP port")));
+                },
+            };
+        }
+    }
     
     pub struct TcpReceiver {
         active: bool,
@@ -89,17 +185,9 @@ pub mod receiver {
         receive_buffer: usize,
     }
     impl TcpReceiver {
-        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port:&u16, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
+        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port_pool:&mut TcpPortPool, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
-            let listener:TcpListener;
-            match peer_ip {
-                IpAddr::V6(_) => {
-                    listener = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
-                },
-                IpAddr::V4(_) => {
-                    listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
-                },
-            };
+            let listener:TcpListener = port_pool.bind(peer_ip).expect(format!("failed to bind TCP socket").as_str());
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
             
             let mio_poll_token = Token(0);

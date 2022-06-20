@@ -77,34 +77,17 @@ welcome.
 
 ## usage
 
-Everything is outlined in the output of `--help` and most users familiar with
-similar tools should feel comfortable immediately.
+Everything is outlined in the output of `--help` and most users familiar with similar tools should feel comfortable immediately.
 
-_rperf_ works much like _iperf3_, sharing a lot of concepts and even
-command-line flags. One key area where it differs is that the client drives
-all of the configuration process while the server just complies to the best
-of its ability and provides a stream of results. This means that the server
-will not present test-results directly via its interface and also that TCP
-and UDP tests can be run against the same instance, potentially by many clients
-simultaneously.
+_rperf_ works much like _iperf3_, sharing a lot of concepts and even command-line flags. One key area where it differs is that the client drives all of the configuration process while the server just complies to the best of its ability and provides a stream of results. This means that the server will not present test-results directly via its interface and also that TCP and UDP tests can be run against the same instance, potentially by many clients simultaneously.
 
-In its normal mode of operation, the client will upload data to the server;
-when the `reverse` flag is set, the client will receive data.
+In its normal mode of operation, the client will upload data to the server; when the `reverse` flag is set, the client will receive data.
 
-Unlike _iperf3_, _rperf_ does not make use of a reserved port-range. This is
-so it can support an arbitrary number of clients in parallel without
-resource contention on what can only practically be a small number of
-contiguous ports. In its intended capacity, this shouldn't be a problem, but
-it does make `reverse` incompatible with most non-permissive firewalls and
-NAT setups.
+Unlike _iperf3_, _rperf_ does not make use of a reserved port-range by default. This is so it can support an arbitrary number of clients in parallel without resource contention on what can only practically be a small number of contiguous ports. In its intended capacity, this shouldn't be a problem, but where non-permissive firewalls and NAT setups are concerned, the `--tcp[6]-port-pool` and `--udp[6]-port-pool` options may be used to allocate non-continguous ports to the set that will be used to receive traffic.
 
-There also isn't a concept of testing throughput relative to a fixed quantity
-of data. Rather, the sole focus is on measuring throughput over a roughly
-known period of time.
+There also isn't a concept of testing throughput relative to a fixed quantity of data. Rather, the sole focus is on measuring throughput over a roughly known period of time.
 
-Also of relevance is that, if the server is running in IPv6 mode and its
-host supports IPv4-mapping in a dual-stack configuration, both IPv4 and IPv6
-clients can connect to the same instance.
+Also of relevance is that, if the server is running in IPv6 mode and its host supports IPv4-mapping in a dual-stack configuration, both IPv4 and IPv6 clients can connect to the same instance.
 
 
 ## building

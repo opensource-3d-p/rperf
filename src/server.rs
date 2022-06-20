@@ -17,7 +17,7 @@
  * You should have received a copy of the GNU General Public License
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
- 
+
 use std::error::Error;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
@@ -53,7 +53,12 @@ static ALIVE:AtomicBool = AtomicBool::new(true);
 static CLIENTS:AtomicU16 = AtomicU16::new(0);
 
 
-fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>) -> BoxResult<()> {
+fn handle_client(
+    stream:&mut TcpStream,
+    cpu_affinity_manager:Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>,
+    tcp_port_pool:Arc<Mutex<tcp::receiver::TcpPortPool>>,
+    udp_port_pool:Arc<Mutex<udp::receiver::UdpPortPool>>,
+) -> BoxResult<()> {
     let mut started = false;
     let peer_addr = stream.peer_addr()?;
     
@@ -95,12 +100,14 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                             if payload.get("family").unwrap_or(&serde_json::json!("tcp")).as_str().unwrap() == "udp" {
                                 log::info!("[{}] preparing for UDP test with {} streams...", &peer_addr, stream_count);
                                 
+                                let mut c_udp_port_pool = udp_port_pool.lock().unwrap();
+                                
                                 let test_definition = udp::UdpTestDefinition::new(&payload)?;
                                 for stream_idx in 0..stream_count {
                                     log::debug!("[{}] preparing UDP-receiver for stream {}...", &peer_addr, stream_idx);
                                     let test = udp::receiver::UdpReceiver::new(
                                         test_definition.clone(), &(stream_idx as u8),
-                                        &0,
+                                        &mut c_udp_port_pool,
                                         &peer_addr.ip(),
                                         &(payload["receive_buffer"].as_i64().unwrap() as usize),
                                     )?;
@@ -110,12 +117,14 @@ fn handle_client(stream:&mut TcpStream, cpu_affinity_manager:Arc<Mutex<crate::ut
                             } else { //TCP
                                 log::info!("[{}] preparing for TCP test with {} streams...", &peer_addr, stream_count);
                                 
+                                let mut c_tcp_port_pool = tcp_port_pool.lock().unwrap();
+                                
                                 let test_definition = tcp::TcpTestDefinition::new(&payload)?;
                                 for stream_idx in 0..stream_count {
                                     log::debug!("[{}] preparing TCP-receiver for stream {}...", &peer_addr, stream_idx);
                                     let test = tcp::receiver::TcpReceiver::new(
                                         test_definition.clone(), &(stream_idx as u8),
-                                        &0,
+                                        &mut c_tcp_port_pool,
                                         &peer_addr.ip(),
                                         &(payload["receive_buffer"].as_i64().unwrap() as usize),
                                     )?;
@@ -274,6 +283,15 @@ impl Drop for ClientThreadMonitor {
 
 pub fn serve(args:ArgMatches) -> BoxResult<()> {
     //config-parsing and pre-connection setup
+    let tcp_port_pool = Arc::new(Mutex::new(tcp::receiver::TcpPortPool::new(
+        args.value_of("tcp_port_pool").unwrap().to_string(),
+        args.value_of("tcp6_port_pool").unwrap().to_string(),
+    )));
+    let udp_port_pool = Arc::new(Mutex::new(udp::receiver::UdpPortPool::new(
+        args.value_of("udp_port_pool").unwrap().to_string(),
+        args.value_of("udp6_port_pool").unwrap().to_string(),
+    )));
+    
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let client_limit:u16 = args.value_of("client_limit").unwrap().parse()?;
@@ -320,6 +338,8 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                                 CLIENTS.fetch_sub(1, Ordering::Relaxed);
                             } else {
                                 let c_cam = cpu_affinity_manager.clone();
+                                let c_tcp_port_pool = tcp_port_pool.clone();
+                                let c_udp_port_pool = udp_port_pool.clone();
                                 let thread_builder = thread::Builder::new()
                                     .name(address.to_string().into());
                                 thread_builder.spawn(move || {
@@ -328,7 +348,7 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                                         client_address: address.to_string(),
                                     };
                                     
-                                    match handle_client(&mut stream, c_cam) {
+                                    match handle_client(&mut stream, c_cam, c_tcp_port_pool, c_udp_port_pool) {
                                         Ok(_) => (),
                                         Err(e) => log::error!("error in client-handler: {}", e),
                                     }

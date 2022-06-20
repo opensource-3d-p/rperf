@@ -99,6 +99,15 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
     let mut complete = false;
     
     //config-parsing and pre-connection setup
+    let mut tcp_port_pool = tcp::receiver::TcpPortPool::new(
+        args.value_of("tcp_port_pool").unwrap().to_string(),
+        args.value_of("tcp6_port_pool").unwrap().to_string(),
+    );
+    let mut udp_port_pool = udp::receiver::UdpPortPool::new(
+        args.value_of("udp_port_pool").unwrap().to_string(),
+        args.value_of("udp6_port_pool").unwrap().to_string(),
+    );
+    
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?));
     
     let display_json:bool;
@@ -199,7 +208,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 log::debug!("preparing UDP-receiver for stream {}...", stream_idx);
                 let test = udp::receiver::UdpReceiver::new(
                     test_definition.clone(), &(stream_idx as u8),
-                    &0,
+                    &mut udp_port_pool,
                     &server_addr.ip(),
                     &(download_config["receive_buffer"].as_i64().unwrap() as usize),
                 )?;
@@ -214,7 +223,7 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
                 let test = tcp::receiver::TcpReceiver::new(
                     test_definition.clone(), &(stream_idx as u8),
-                    &0,
+                    &mut tcp_port_pool,
                     &server_addr.ip(),
                     &(download_config["receive_buffer"].as_i64().unwrap() as usize),
                 )?;
