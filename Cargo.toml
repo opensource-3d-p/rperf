@@ -28,7 +28,6 @@ uuid = {version = "0.8", features = ["v4"]}
 #install with "cargo install cargo-deb"
 #then "cargo deb" to build simple Debian packages for this project
 [package.metadata.deb]
-maintainer-scripts = "debian-maintainer-scripts/"
 copyright = "(C) 2022 Evtech Solutions, Ltd., dba 3D-P"
 license-file = ["COPYING", "0"]
 extended-description = """
