@@ -1,9 +1,9 @@
 [package]
 name = "rperf"
-version = "0.1.6"
+version = "0.1.7"
 description = "validates network throughput capacity and reliability"
 authors = ["Neil Tallim <neiltallim@3d-p.com>"]
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/opensource-3d-p/rperf"
 license = "GPLv3"
 keywords = ["network", "performance", "tcp", "udp"]

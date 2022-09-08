@@ -506,6 +506,7 @@ pub mod sender {
     impl super::TestStream for UdpSender {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
+            let mut interval_iteration = 0;
             let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
             let mut bytes_to_send_remaining = bytes_to_send;
             let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
@@ -563,10 +564,12 @@ pub mod sender {
                         sleep(super::INTERVAL - elapsed_time);
                     }
                 } else if bytes_to_send_per_interval_slice_remaining <= 0 { // interval subsection exhausted
+                    interval_iteration += 1;
                     bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
                     let elapsed_time = cycle_start.elapsed();
-                    if interval_duration > elapsed_time {
-                        sleep(interval_duration - elapsed_time);
+                    let interval_endtime = interval_iteration * interval_duration;
+                    if interval_endtime > elapsed_time {
+                        sleep(interval_endtime - elapsed_time);
                     }
                 }
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
