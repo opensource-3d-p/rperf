@@ -185,6 +185,8 @@ pub mod receiver {
         
         unbroken_sequence: u64,
         jitter_seconds: Option<f32>,
+        longest_unbroken_sequence: u64,
+        longest_jitter_seconds: Option<f32>,
         previous_time_delta_nanoseconds: i64,
     }
     
@@ -299,6 +301,11 @@ pub mod receiver {
                 
                 history.unbroken_sequence += 1;
                 self.process_jitter(&source_timestamp, &mut history);
+                
+                if history.unbroken_sequence > history.longest_unbroken_sequence {
+                    history.longest_unbroken_sequence = history.unbroken_sequence
+                    history.longest_jitter_seconds = history.jitter_seconds
+                }
             } else {
                 history.unbroken_sequence = 0;
                 history.jitter_seconds = None;
@@ -321,6 +328,8 @@ pub mod receiver {
                 
                 unbroken_sequence: 0,
                 jitter_seconds: None,
+                longest_unbroken_sequence: 0,
+                longest_jitter_seconds: None,
                 previous_time_delta_nanoseconds: 0,
             };
             
@@ -366,8 +375,8 @@ pub mod receiver {
                                         packets_out_of_order: history.packets_out_of_order,
                                         packets_duplicated: history.packets_duplicated,
                                         
-                                        unbroken_sequence: history.unbroken_sequence,
-                                        jitter_seconds: history.jitter_seconds,
+                                        unbroken_sequence: history.longest_unbroken_sequence,
+                                        jitter_seconds: history.longest_jitter_seconds,
                                     })))
                                 }
                             } else {
@@ -398,8 +407,8 @@ pub mod receiver {
                     packets_out_of_order: history.packets_out_of_order,
                     packets_duplicated: history.packets_duplicated,
                     
-                    unbroken_sequence: history.unbroken_sequence,
-                    jitter_seconds: history.jitter_seconds,
+                    unbroken_sequence: history.longest_unbroken_sequence,
+                    jitter_seconds: history.longest_jitter_seconds,
                 })))
             } else {
                 None
