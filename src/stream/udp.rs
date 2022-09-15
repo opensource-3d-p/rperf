@@ -303,8 +303,8 @@ pub mod receiver {
                 self.process_jitter(&source_timestamp, &mut history);
                 
                 if history.unbroken_sequence > history.longest_unbroken_sequence {
-                    history.longest_unbroken_sequence = history.unbroken_sequence
-                    history.longest_jitter_seconds = history.jitter_seconds
+                    history.longest_unbroken_sequence = history.unbroken_sequence;
+                    history.longest_jitter_seconds = history.jitter_seconds;
                 }
             } else {
                 history.unbroken_sequence = 0;
@@ -561,6 +561,8 @@ pub mod sender {
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
                         //nothing to do, but avoid burning CPU cycles
                         sleep(BUFFER_FULL_TIMEOUT);
+                        //roll back the packet-ID because nothing was actually emitted
+                        self.next_packet_id -= 1;
                     },
                     Err(e) => {
                         return Some(Err(Box::new(e)));
