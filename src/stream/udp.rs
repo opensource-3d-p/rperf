@@ -507,9 +507,6 @@ pub mod sender {
             //the next eight are the seconds part of the UNIX timestamp and the following four are the nanoseconds
             self.staged_packet[24..32].copy_from_slice(&now.as_secs().to_be_bytes());
             self.staged_packet[32..36].copy_from_slice(&now.subsec_nanos().to_be_bytes());
-            
-            //prepare for the next packet
-            self.next_packet_id += 1;
         }
     }
     impl super::TestStream for UdpSender {
@@ -537,6 +534,8 @@ pub mod sender {
                         log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);
                         
                         packets_sent += 1;
+                        //reflect that a packet is in-flight
+                        self.next_packet_id += 1;
                         
                         let bytes_written = packet_size as i64 + super::UDP_HEADER_SIZE as i64;
                         bytes_sent += bytes_written as u64;
@@ -564,8 +563,6 @@ pub mod sender {
                         //nothing to do, but avoid burning CPU cycles
                         sleep(BUFFER_FULL_TIMEOUT);
                         sends_blocked += 1;
-                        //roll back the packet-ID because nothing was actually emitted
-                        self.next_packet_id -= 1;
                     },
                     Err(e) => {
                         return Some(Err(Box::new(e)));
