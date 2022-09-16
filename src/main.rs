@@ -161,7 +161,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("send_buffer")
-                .help("send_buffer, in bytes; affects TCP window-size (only supported on some platforms; if set too small, a 'resource unavailable' error may occur)")
+                .help("send_buffer, in bytes (only supported on some platforms; if set too small, a 'resource unavailable' error may occur; affects TCP window-size)")
                 .takes_value(true)
                 .long("send-buffer")
                 .required(false)
@@ -169,7 +169,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("receive_buffer")
-                .help("receive_buffer, in bytes; affects TCP window-size (only supported on some platforms; if set too small, a 'resource unavailable' error may occur)")
+                .help("receive_buffer, in bytes (only supported on some platforms; if set too small, a 'resource unavailable' error may occur; affects TCP window-size)")
                 .takes_value(true)
                 .long("receive-buffer")
                 .required(false)
