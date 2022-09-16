@@ -522,6 +522,7 @@ pub mod sender {
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
             
             let mut packets_sent:u64 = 0;
+            let mut sends_blocked:u64 = 0;
             let mut bytes_sent:u64 = 0;
             
             let cycle_start = Instant::now();
@@ -555,12 +556,14 @@ pub mod sender {
                                 
                                 bytes_sent: bytes_sent,
                                 packets_sent: packets_sent,
+                                sends_blocked: sends_blocked,
                             })))
                         }
                     },
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
                         //nothing to do, but avoid burning CPU cycles
                         sleep(BUFFER_FULL_TIMEOUT);
+                        sends_blocked += 1;
                         //roll back the packet-ID because nothing was actually emitted
                         self.next_packet_id -= 1;
                     },
@@ -595,6 +598,7 @@ pub mod sender {
                     
                     bytes_sent: bytes_sent,
                     packets_sent: packets_sent,
+                    sends_blocked: sends_blocked,
                 })))
             } else {
                 //indicate that the test is over by sending the test ID by itself

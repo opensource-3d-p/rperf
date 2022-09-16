@@ -244,6 +244,7 @@ pub struct TcpSendResult {
     pub duration: f32,
     
     pub bytes_sent: u64,
+    pub sends_blocked: u64,
 }
 impl TcpSendResult {
     fn from_json(value:serde_json::Value) -> BoxResult<TcpSendResult> {
@@ -288,12 +289,16 @@ impl IntervalResult for TcpSendResult {
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
         
-        format!("----------\n\
+        let mut output = format!("----------\n\
                  TCP send result over {:.2}s | stream: {}\n\
                  bytes: {} | per second: {:.3} | {}",
                 self.duration, self.stream_idx,
                 self.bytes_sent, bytes_per_second, throughput,
-        )
+        );
+        if self.sends_blocked > 0 {
+            output.push_str(&format!("\nstalls due to full send-buffer: {}", self.sends_blocked));
+        }
+        output
     }
 }
 
@@ -383,6 +388,7 @@ pub struct UdpSendResult {
     
     pub bytes_sent: u64,
     pub packets_sent: u64,
+    pub sends_blocked: u64,
 }
 impl UdpSendResult {
     fn from_json(value:serde_json::Value) -> BoxResult<UdpSendResult> {
@@ -427,14 +433,18 @@ impl IntervalResult for UdpSendResult {
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
         
-        format!("----------\n\
+        let mut output = format!("----------\n\
                  UDP send result over {:.2}s | stream: {}\n\
                  bytes: {} | per second: {:.3} | {}\n\
                  packets: {} per second: {:.3}",
                 self.duration, self.stream_idx,
                 self.bytes_sent, bytes_per_second, throughput,
                 self.packets_sent, self.packets_sent as f32 / duration_divisor,
-        )
+        );
+        if self.sends_blocked > 0 {
+            output.push_str(&format!("\nstalls due to full send-buffer: {}", self.sends_blocked));
+        }
+        output
     }
 }
 

@@ -517,6 +517,7 @@ pub mod sender {
             let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
             
+            let mut sends_blocked:u64 = 0;
             let mut bytes_sent:u64 = 0;
             
             let peer_addr = match stream.peer_addr() {
@@ -550,12 +551,14 @@ pub mod sender {
                                 duration: elapsed_time.as_secs_f32(),
                                 
                                 bytes_sent: bytes_sent,
+                                sends_blocked: sends_blocked,
                             })))
                         }
                     },
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
                         //nothing to do, but avoid burning CPU cycles
                         sleep(BUFFER_FULL_TIMEOUT);
+                        sends_blocked += 1;
                     },
                     Err(e) => {
                         return Some(Err(Box::new(e)));
@@ -587,6 +590,7 @@ pub mod sender {
                     duration: cycle_start.elapsed().as_secs_f32(),
                     
                     bytes_sent: bytes_sent,
+                    sends_blocked: sends_blocked,
                 })))
             } else {
                 //indicate that the test is over by dropping the stream
