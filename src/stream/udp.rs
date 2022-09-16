@@ -602,10 +602,20 @@ pub mod sender {
                 })))
             } else {
                 //indicate that the test is over by sending the test ID by itself
-                for _ in 0..4 { //do it a few times in case of loss
-                    let send_result = self.socket.send(&self.staged_packet[0..16]);
-                    if send_result.is_err() {
-                        return Some(Err(Box::new(send_result.unwrap_err())));
+                let mut remaining_announcements = 5;
+                while remaining_announcements > 0 { //do it a few times in case of loss
+                    match self.socket.send(&self.staged_packet[0..16]) {
+                        Ok(packet_size) => {
+                            log::trace!("wrote {} bytes of test-end signal in UDP stream {}", packet_size, self.stream_idx);
+                            remaining_announcements -= 1;
+                        },
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //send-buffer is full
+                            //wait to try again and avoid burning CPU cycles
+                            sleep(BUFFER_FULL_TIMEOUT);
+                        },
+                        Err(e) => {
+                            return Some(Err(Box::new(e)));
+                        },
                     }
                 }
                 None
