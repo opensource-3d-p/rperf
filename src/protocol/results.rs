@@ -248,7 +248,12 @@ pub struct TcpSendResult {
 }
 impl TcpSendResult {
     fn from_json(value:serde_json::Value) -> BoxResult<TcpSendResult> {
-        let send_result:TcpSendResult = serde_json::from_value(value)?;
+        let mut local_value = value.clone();
+        if local_value.get("sends_blocked").is_none() { //pre-0.1.8 peer
+            local_value["sends_blocked"] = serde_json::json!(0 as u64); //report pre-0.1.8 status
+        }
+        
+        let send_result:TcpSendResult = serde_json::from_value(local_value)?;
         Ok(send_result)
     }
     
@@ -392,7 +397,12 @@ pub struct UdpSendResult {
 }
 impl UdpSendResult {
     fn from_json(value:serde_json::Value) -> BoxResult<UdpSendResult> {
-        let send_result:UdpSendResult = serde_json::from_value(value)?;
+        let mut local_value = value.clone();
+        if local_value.get("sends_blocked").is_none() { //pre-0.1.8 peer
+            local_value["sends_blocked"] = serde_json::json!(0 as u64); //report pre-0.1.8 status
+        }
+        
+        let send_result:UdpSendResult = serde_json::from_value(local_value)?;
         Ok(send_result)
     }
     
