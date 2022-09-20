@@ -233,7 +233,9 @@ pub mod receiver {
                 self.next_packet_id += 1;
                 return true;
             } else if packet_id > self.next_packet_id { //something was either lost or there's an ordering problem
-                history.packets_lost += (packet_id - self.next_packet_id) as i64; //assume everything in-between has been lost
+                let lost_packet_count = (packet_id - self.next_packet_id) as i64;
+                log::debug!("UDP reception for stream {} observed a gap of {} packets", self.stream_idx, lost_packet_count);
+                history.packets_lost += lost_packet_count; //assume everything in-between has been lost
                 self.next_packet_id = packet_id + 1; //anticipate that ordered receipt will resume
             } else { //a packet with a previous ID was received; this is either a duplicate or an ordering issue
                 //CAUTION: this is where the approximation part of the algorithm comes into play
