@@ -824,6 +824,7 @@ impl TestResults for TcpTestResults {
         let mut duration_receive:f64 = 0.0;
         let mut bytes_received:u64 = 0;
         
+        let mut sends_blocked = false;
         
         for (stream_idx, stream) in self.stream_results.values().enumerate() {
             for (i, sr) in stream.send_results.iter().enumerate() {
@@ -835,6 +836,8 @@ impl TestResults for TcpTestResults {
                 stream_send_durations[stream_idx] += sr.duration as f64;
                 
                 bytes_sent += sr.bytes_sent;
+                
+                sends_blocked |= sr.sends_blocked > 0;
             }
             
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -899,6 +902,9 @@ impl TestResults for TcpTestResults {
                                 receive_bytes_per_second, receive_throughput,
                                 bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
         );
+        if sends_blocked {
+            output.push_str(&format!("\nthroughput throttled by buffer limitations"));
+        }
         if !self.is_success() {
             output.push_str(&format!("\nTESTING DID NOT COMPLETE SUCCESSFULLY"));
         }
@@ -1097,6 +1103,7 @@ impl TestResults for UdpTestResults {
         let mut unbroken_sequence_count:u64 = 0;
         let mut jitter_weight:f64 = 0.0;
         
+        let mut sends_blocked = false;
         
         for (stream_idx, stream) in self.stream_results.values().enumerate() {
             for (i, sr) in stream.send_results.iter().enumerate() {
@@ -1109,6 +1116,8 @@ impl TestResults for UdpTestResults {
                 
                 bytes_sent += sr.bytes_sent;
                 packets_sent += sr.packets_sent;
+                
+                sends_blocked |= sr.sends_blocked > 0;
             }
             
             for (i, rr) in stream.receive_results.iter().enumerate() {
@@ -1196,6 +1205,9 @@ impl TestResults for UdpTestResults {
         );
         if jitter_calculated {
             output.push_str(&format!("\njitter: {:.6}s over {} consecutive packets", jitter_weight / (unbroken_sequence_count as f64), unbroken_sequence_count));
+        }
+        if sends_blocked {
+            output.push_str(&format!("\nthroughput throttled by buffer limitations"));
         }
         if !self.is_success() {
             output.push_str(&format!("\nTESTING DID NOT COMPLETE SUCCESSFULLY"));
