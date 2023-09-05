@@ -17,13 +17,15 @@
  * You should have received a copy of the GNU General Public License
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
- 
-extern crate log;
-extern crate nix;
 
 use std::error::Error;
 
-use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
+cfg_if::cfg_if! {
+    if #[cfg(unix)] { //NOTE: features unsupported on Windows
+        extern crate nix;
+        use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
+    }
+}
 
 use crate::protocol::results::{IntervalResult, UdpReceiveResult, UdpSendResult, get_unix_timestamp};
 
@@ -67,9 +69,13 @@ impl UdpTestDefinition {
 }
 
 pub mod receiver {
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] { //NOTE: features unsupported on Windows
+            use std::os::unix::io::AsRawFd;
+        }
+    }
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::sync::{Mutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
@@ -203,10 +209,12 @@ pub mod receiver {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket:UdpSocket = port_pool.bind(peer_ip).expect(format!("failed to bind UDP socket").as_str());
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
-            if !cfg!(windows) { //NOTE: features unsupported on Windows
-                if *receive_buffer != 0 {
-                    log::debug!("setting receive-buffer to {}...", receive_buffer);
-                    super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
+            cfg_if::cfg_if! {
+                if #[cfg(unix)] { //NOTE: features unsupported on Windows
+                    if *receive_buffer != 0 {
+                        log::debug!("setting receive-buffer to {}...", receive_buffer);
+                        super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
+                    }
                 }
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
@@ -435,8 +443,12 @@ pub mod receiver {
 
 
 pub mod sender {
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] { //NOTE: features unsupported on Windows
+            use std::os::unix::io::AsRawFd;
+        }
+    }
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use std::net::UdpSocket;
@@ -469,10 +481,12 @@ pub mod sender {
                 IpAddr::V4(_) => UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port)).expect(format!("failed to bind UDP socket, port {}", port).as_str()),
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
-            if !cfg!(windows) { //NOTE: features unsupported on Windows
-                if *send_buffer != 0 {
-                    log::debug!("setting send-buffer to {}...", send_buffer);
-                    super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
+            cfg_if::cfg_if! {
+                if #[cfg(unix)] { //NOTE: features unsupported on Windows
+                    if *send_buffer != 0 {
+                        log::debug!("setting send-buffer to {}...", send_buffer);
+                        super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
+                    }
                 }
             }
             socket.connect(socket_addr_receiver)?;

@@ -18,9 +18,12 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-extern crate nix;
-
-use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
+cfg_if::cfg_if! {
+    if #[cfg(unix)] { //NOTE: features unsupported on Windows
+        extern crate nix;
+        use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
+    }
+}
 
 use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult, get_unix_timestamp};
 
@@ -65,9 +68,13 @@ impl TcpTestDefinition {
 
 
 pub mod receiver {
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] { //NOTE: features unsupported on Windows
+            use std::os::unix::io::AsRawFd;
+        }
+    }
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::sync::{Mutex};
     use std::time::{Duration, Instant};
     
@@ -255,10 +262,12 @@ pub mod receiver {
                                                 Ok(_) => {
                                                     if buffer == self.test_definition.test_id {
                                                         log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
-                                                        if !cfg!(windows) { //NOTE: features unsupported on Windows
-                                                            if self.receive_buffer != 0 {
-                                                                log::debug!("setting receive-buffer to {}...", self.receive_buffer);
-                                                                super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
+                                                        cfg_if::cfg_if! {
+                                                            if #[cfg(unix)] { //NOTE: features unsupported on Windows
+                                                                if self.receive_buffer != 0 {
+                                                                    log::debug!("setting receive-buffer to {}...", self.receive_buffer);
+                                                                    super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
+                                                                }
                                                             }
                                                         }
                                                         
@@ -411,9 +420,13 @@ pub mod receiver {
 
 
 pub mod sender {
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] { //NOTE: features unsupported on Windows
+            use std::os::unix::io::AsRawFd;
+        }
+    }
     use std::io::Write;
     use std::net::{IpAddr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant};
     
     use mio::net::TcpStream;
@@ -486,10 +499,12 @@ pub mod sender {
                 log::debug!("setting no-delay...");
                 stream.set_nodelay(true)?;
             }
-            if !cfg!(windows) { //NOTE: features unsupported on Windows
-                if self.send_buffer != 0 {
-                    log::debug!("setting send-buffer to {}...", self.send_buffer);
-                    super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
+            cfg_if::cfg_if! {
+                if #[cfg(unix)] { //NOTE: features unsupported on Windows
+                    if self.send_buffer != 0 {
+                        log::debug!("setting send-buffer to {}...", self.send_buffer);
+                        super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
+                    }
                 }
             }
             Ok(stream)
