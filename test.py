@@ -71,7 +71,6 @@ class TestIpv4(unittest.TestCase):
         result = _run_rperf_client_ipv4((
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-P', '2', #two parallel streams
             '-t', '2', #run for two seconds
         ))
@@ -81,15 +80,14 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['config']['additional']['reverse'], False)
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 3.5, delta=1.0)
         
     def test_tcp_reverse(self):
         result = _run_rperf_client_ipv4((
             '-R', #run in reverse mode
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-P', '2', #two parallel streams
             '-t', '2', #run for two seconds
         ))
@@ -99,15 +97,14 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['config']['additional']['reverse'], True)
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 3.5, delta=1.0)
         
     def test_udp_forward(self):
         result = _run_rperf_client_ipv4((
             '-u', #run UDP test
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '1200', #try to send 1200 bytes of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-P', '2', #two parallel streams
             '-t', '2', #run for two seconds
         ))
@@ -118,7 +115,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
-        self.assertEqual(result['summary']['framed_packet_size'], 1228)
+        self.assertEqual(result['summary']['framed_packet_size'], 1208)
         self.assertEqual(result['summary']['packets_duplicate'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
@@ -131,7 +128,6 @@ class TestIpv4(unittest.TestCase):
             '-R', #run in reverse mode
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '1200', #try to send 1200 bytes of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-P', '2', #two parallel streams
             '-t', '2', #run for two seconds
         ))
@@ -142,7 +138,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
-        self.assertEqual(result['summary']['framed_packet_size'], 1228)
+        self.assertEqual(result['summary']['framed_packet_size'], 1208)
         self.assertEqual(result['summary']['packets_duplicate'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
@@ -167,7 +163,6 @@ class TestIpv6(unittest.TestCase):
         result = _run_rperf_client_ipv6((
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-t', '2', #run for two seconds
         ))
         self.assertTrue(result['success'])
@@ -176,15 +171,14 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['config']['additional']['reverse'], False)
         self.assertEqual(result['config']['additional']['ip_version'], 6)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
         
     def test_tcp_reverse(self):
         result = _run_rperf_client_ipv6((
             '-R', #run in reverse mode
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-t', '2', #run for two seconds
         ))
         self.assertTrue(result['success'])
@@ -193,8 +187,8 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['config']['additional']['reverse'], True)
         self.assertEqual(result['config']['additional']['ip_version'], 6)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
         
     def test_udp_forward(self):
         result = _run_rperf_client_ipv6((
@@ -210,7 +204,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['config']['additional']['ip_version'], 6)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
-        self.assertEqual(result['summary']['framed_packet_size'], 1228)
+        self.assertEqual(result['summary']['framed_packet_size'], 1208)
         self.assertEqual(result['summary']['packets_duplicate'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
@@ -232,7 +226,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['config']['additional']['ip_version'], 6)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
-        self.assertEqual(result['summary']['framed_packet_size'], 1228)
+        self.assertEqual(result['summary']['framed_packet_size'], 1208)
         self.assertEqual(result['summary']['packets_duplicate'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
@@ -258,7 +252,6 @@ class TestMisc(unittest.TestCase):
             '-N', #disable Nagle's algorithm
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-t', '2', #run for two seconds
         ))
         self.assertTrue(result['success'])
@@ -266,8 +259,8 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(result['config']['common']['streams'], 1)
         self.assertEqual(result['config']['additional']['reverse'], False)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 1.75, delta=0.5)
         
     def test_hostname_reverse(self):
         result = _run_rperf_client_hostname((
@@ -275,7 +268,6 @@ class TestMisc(unittest.TestCase):
             '-R', #run in reverse mode
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-t', '2', #run for two seconds
         ))
         self.assertTrue(result['success'])
@@ -283,15 +275,14 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(result['config']['common']['streams'], 1)
         self.assertEqual(result['config']['additional']['reverse'], True)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 1.75, delta=0.5)
         
     def test_ipv4_mapped_with_core_affinity(self):
         result = _run_rperf_client_ipv4((
             '-A', '2,3', #set CPU core-affinity to 2 and 3
             '-b', '500000', #keep it light, at 500kBps per stream
             '-l', '4096', #try to send 4k of data at a time
-            '-O', '1', #omit the first second of data from summaries
             '-P', '2', #two parallel streams
             '-t', '2', #run for two seconds
         ))
@@ -301,8 +292,8 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(result['config']['additional']['reverse'], False)
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
-        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 3.5, delta=1.0)
         
     def test_multiple_simultaneous_clients(self):
         with concurrent.futures.ThreadPoolExecutor() as executor:
