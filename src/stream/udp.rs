@@ -222,7 +222,7 @@ pub mod receiver {
             })
         }
         
-        fn process_packets_ordering(&mut self, packet_id:u64, mut history:&mut UdpReceiverIntervalHistory) -> bool {
+        fn process_packets_ordering(&mut self, packet_id:u64, history:&mut UdpReceiverIntervalHistory) -> bool {
             /* the algorithm from iperf3 provides a pretty decent approximation
              * for tracking lost and out-of-order packets efficiently, so it's
              * been minimally reimplemented here, with corrections.
