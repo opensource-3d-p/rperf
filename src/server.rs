@@ -29,8 +29,8 @@ use std::time::{Duration};
 
 use clap::ArgMatches;
 
-use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Ready, Poll, PollOpt, Token};
+use std::net::{TcpListener, TcpStream};
+use socket2::{SockRef, TcpKeepalive};
 
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
@@ -246,14 +246,14 @@ fn handle_client(
     
     log::debug!("[{}] stopping any still-in-progress streams", &peer_addr);
     for ps in parallel_streams.iter_mut() {
-        let mut stream = match (*ps).lock() {
+        let mut test_stream = match (*ps).lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
                 log::error!("[{}] a stream-handler was poisoned; this indicates some sort of logic error", &peer_addr);
                 poisoned.into_inner()
             },
         };
-        stream.stop();
+        test_stream.stop();
     }
     log::debug!("[{}] waiting for all streams to end", &peer_addr);
     for jh in parallel_streams_joinhandles {
@@ -301,72 +301,59 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
     
     //start listening for connections
     let port:u16 = args.value_of("port").unwrap().parse()?;
-    let mut listener:TcpListener;
+    let listener:TcpListener;
     if args.is_present("version6") {
         listener = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     } else {
         listener = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)).expect(format!("failed to bind TCP socket, port {}", port).as_str());
     }
+    listener.set_nonblocking(true).expect("unable to make TCP server non-blocking");
     log::info!("server listening on {}", listener.local_addr()?);
     
-    let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(
-        &mut listener,
-        mio_token,
-        Ready::readable(),
-        PollOpt::edge(),
-    )?;
-    let mut events = Events::with_capacity(32);
-    
     while is_alive() {
-        poll.poll(&mut events, Some(POLL_TIMEOUT))?;
-        for event in events.iter() {
-            match event.token() {
-                _ => loop {
-                    match listener.accept() {
-                        Ok((mut stream, address)) => {
-                            log::info!("connection from {}", address);
-                            
-                            stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-                            stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
-                            
-                            let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
-                            if client_limit > 0 && client_count > client_limit {
-                                log::warn!("client-limit ({}) reached; disconnecting {}...", client_limit, address.to_string());
-                                stream.shutdown(Shutdown::Both).unwrap_or_default();
-                                CLIENTS.fetch_sub(1, Ordering::Relaxed);
-                            } else {
-                                let c_cam = cpu_affinity_manager.clone();
-                                let c_tcp_port_pool = tcp_port_pool.clone();
-                                let c_udp_port_pool = udp_port_pool.clone();
-                                let thread_builder = thread::Builder::new()
-                                    .name(address.to_string().into());
-                                thread_builder.spawn(move || {
-                                    //ensure the client is accounted-for even if the handler panics
-                                    let _client_thread_monitor = ClientThreadMonitor{
-                                        client_address: address.to_string(),
-                                    };
-                                    
-                                    match handle_client(&mut stream, c_cam, c_tcp_port_pool, c_udp_port_pool) {
-                                        Ok(_) => (),
-                                        Err(e) => log::error!("error in client-handler: {}", e),
-                                    }
-                                    
-                                    //in the event of panic, this will happen when the stream is dropped
-                                    stream.shutdown(Shutdown::Both).unwrap_or_default();
-                                })?;
-                            }
-                        },
-                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => { //nothing to do
-                            break;
-                        },
-                        Err(e) => {
-                            return Err(Box::new(e));
-                        },
-                    }
-                },
-            }
+        match listener.accept() {
+            Ok((mut stream, address)) => {
+                log::info!("connection from {}", address);
+                
+                stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
+                
+                let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+                let raw_socket = SockRef::from(&stream);
+                raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+                
+                let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
+                if client_limit > 0 && client_count > client_limit {
+                    log::warn!("client-limit ({}) reached; disconnecting {}...", client_limit, address.to_string());
+                    stream.shutdown(Shutdown::Both).unwrap_or_default();
+                    CLIENTS.fetch_sub(1, Ordering::Relaxed);
+                } else {
+                    let c_cam = cpu_affinity_manager.clone();
+                    let c_tcp_port_pool = tcp_port_pool.clone();
+                    let c_udp_port_pool = udp_port_pool.clone();
+                    let thread_builder = thread::Builder::new()
+                        .name(address.to_string().into());
+                    thread_builder.spawn(move || {
+                        //ensure the client is accounted-for even if the handler panics
+                        let _client_thread_monitor = ClientThreadMonitor{
+                            client_address: address.to_string(),
+                        };
+                        
+                        match handle_client(&mut stream, c_cam, c_tcp_port_pool, c_udp_port_pool) {
+                            Ok(_) => (),
+                            Err(e) => log::error!("error in client-handler: {}", e),
+                        }
+                        
+                        //in the event of panic, this will happen when the stream is dropped
+                        stream.shutdown(Shutdown::Both).unwrap_or_default();
+                    })?;
+                }
+            },
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => { //no pending clients
+                thread::sleep(POLL_TIMEOUT);
+            },
+            Err(e) => {
+                return Err(Box::new(e));
+            },
         }
     }
     

@@ -27,7 +27,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::ArgMatches;
 
-use mio::net::{TcpStream};
+use std::net::{TcpStream};
+use socket2::{SockRef, TcpKeepalive};
 
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
@@ -62,18 +63,19 @@ fn connect_to_server(address:&str, port:&u16) -> BoxResult<TcpStream> {
     if server_addr.is_none() {
         return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
     }
-    let raw_stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
+    
+    let stream = match TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
         Ok(s) => s,
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
     };
-    let stream = match TcpStream::from_stream(raw_stream) {
-        Ok(s) => s,
-        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP control-channel: {}", e))),
-    };
-    log::info!("connected to server");
-    
+    log::debug!("connected TCP control-channel to {}", destination);
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-    stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+    
+    let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+    let raw_socket = SockRef::from(&stream);
+    raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+    
+    log::info!("connected to server");
     
     Ok(stream)
 }

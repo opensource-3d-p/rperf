@@ -30,8 +30,10 @@ use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult, 
 use super::{INTERVAL, TestStream, parse_port_spec};
 
 use std::error::Error;
+use std::time::Duration;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
+const KEEPALIVE_DURATION:Duration = Duration::from_secs(5);
 pub const TEST_HEADER_SIZE:usize = 16;
 
 #[derive(Clone)]
@@ -68,18 +70,19 @@ impl TcpTestDefinition {
 
 
 pub mod receiver {
+    use crate::stream::tcp::KEEPALIVE_DURATION;
     cfg_if::cfg_if! {
         if #[cfg(unix)] { //NOTE: features unsupported on Windows
             use std::os::unix::io::AsRawFd;
         }
     }
     use std::io::Read;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
     use std::sync::{Mutex};
+    use std::thread;
     use std::time::{Duration, Instant};
     
-    use mio::net::{TcpListener, TcpStream};
-    use mio::{Events, Ready, Poll, PollOpt, Token};
+    use socket2::{SockRef, TcpKeepalive};
     
     const POLL_TIMEOUT:Duration = Duration::from_millis(250);
     const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
@@ -186,8 +189,6 @@ pub mod receiver {
         
         listener: Option<TcpListener>,
         stream: Option<TcpStream>,
-        mio_poll_token: Token,
-        mio_poll: Poll,
         
         receive_buffer: usize,
     }
@@ -195,10 +196,8 @@ pub mod receiver {
         pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port_pool:&mut TcpPortPool, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let listener:TcpListener = port_pool.bind(peer_ip).expect(format!("failed to bind TCP socket").as_str());
+            listener.set_nonblocking(true).expect("unable to make TCP socket non-blocking");
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
-            
-            let mio_poll_token = Token(0);
-            let mio_poll = Poll::new()?;
             
             Ok(TcpReceiver{
                 active: true,
@@ -207,8 +206,6 @@ pub mod receiver {
                 
                 listener: Some(listener),
                 stream: None,
-                mio_poll_token: mio_poll_token,
-                mio_poll: mio_poll,
                 
                 receive_buffer: receive_buffer.to_owned(),
             })
@@ -218,15 +215,6 @@ pub mod receiver {
             log::debug!("preparing to receive TCP stream {} connection...", self.stream_idx);
             
             let listener = self.listener.as_mut().unwrap();
-            let mio_token = Token(0);
-            let poll = Poll::new()?;
-            poll.register(
-                listener,
-                mio_token,
-                Ready::readable(),
-                PollOpt::edge(),
-            )?;
-            let mut events = Events::with_capacity(1);
             
             let start = Instant::now();
             
@@ -235,74 +223,54 @@ pub mod receiver {
                     return Err(Box::new(simple_error::simple_error!("TCP listening for stream {} timed out", self.stream_idx)));
                 }
                 
-                poll.poll(&mut events, Some(POLL_TIMEOUT))?;
-                for event in events.iter() {
-                    match event.token() {
-                        _ => loop {
-                            match listener.accept() {
-                                Ok((stream, address)) => {
-                                    log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
-                                    
-                                    let mut verification_stream = stream.try_clone()?;
-                                    let mio_token2 = Token(0);
-                                    let poll2 = Poll::new()?;
-                                    poll2.register(
-                                        &verification_stream,
-                                        mio_token2,
-                                        Ready::readable(),
-                                        PollOpt::edge(),
-                                    )?;
-                                    
-                                    let mut buffer = [0_u8; 16];
-                                    let mut events2 = Events::with_capacity(1);
-                                    poll2.poll(&mut events2, Some(RECEIVE_TIMEOUT))?;
-                                    for event2 in events2.iter() {
-                                        match event2.token() {
-                                            _ => match verification_stream.read(&mut buffer) {
-                                                Ok(_) => {
-                                                    if buffer == self.test_definition.test_id {
-                                                        log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
-                                                        cfg_if::cfg_if! {
-                                                            if #[cfg(unix)] { //NOTE: features unsupported on Windows
-                                                                if self.receive_buffer != 0 {
-                                                                    log::debug!("setting receive-buffer to {}...", self.receive_buffer);
-                                                                    super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
-                                                                }
-                                                            }
-                                                        }
-                                                        
-                                                        self.mio_poll.register(
-                                                            &stream,
-                                                            self.mio_poll_token,
-                                                            Ready::readable(),
-                                                            PollOpt::edge(),
-                                                        )?;
-                                                        return Ok(stream);
-                                                    }
-                                                },
-                                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { //client didn't provide anything
-                                                    break;
-                                                },
-                                                Err(e) => {
-                                                    return Err(Box::new(e));
-                                                },
+                match listener.accept() {
+                    Ok((stream, address)) => {
+                        log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
+                        
+                        stream.set_read_timeout(Some(RECEIVE_TIMEOUT)).expect("unable to set TCP read-timeout");
+                        
+                        let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+                        let raw_socket = SockRef::from(&stream);
+                        raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+                        
+                        let mut verification_stream = stream.try_clone()?;
+                        let mut buffer = [0_u8; 16];
+                        
+                        match verification_stream.read(&mut buffer) {
+                            Ok(_) => {
+                                if buffer == self.test_definition.test_id {
+                                    log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
+                                    cfg_if::cfg_if! {
+                                        if #[cfg(unix)] { //NOTE: features unsupported on Windows
+                                            if self.receive_buffer != 0 {
+                                                log::debug!("setting receive-buffer to {}...", self.receive_buffer);
+                                                super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
                                             }
                                         }
                                     }
-                                    log::warn!("could not validate TCP stream {} connection from {}", self.stream_idx, address);
-                                },
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { //nothing to do
-                                    break;
-                                },
-                                Err(e) => {
-                                    return Err(Box::new(e));
-                                },
-                            }
-                        },
-                    }
+                                    
+                                    return Ok(stream);
+                                }
+                            },
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //client didn't provide anything
+                                let _ = stream.shutdown(std::net::Shutdown::Both);
+                            },
+                            Err(e) => {
+                                let _ = stream.shutdown(std::net::Shutdown::Both);
+                                return Err(Box::new(e));
+                            },
+                        }
+                        log::warn!("could not validate TCP stream {} connection from {}", self.stream_idx, address);
+                    },
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { //no pending connection
+                        thread::sleep(POLL_TIMEOUT);
+                    },
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    },
                 }
             }
-            Err(Box::new(simple_error::simple_error!("did not receive a connection")))
+            Err(Box::new(simple_error::simple_error!("did not establish a connection")))
         }
     }
     impl super::TestStream for TcpReceiver {
@@ -324,7 +292,6 @@ pub mod receiver {
             }
             let stream = self.stream.as_mut().unwrap();
             
-            let mut events = Events::with_capacity(1); //only watching one socket
             let mut buf = vec![0_u8; self.test_definition.length];
             
             let peer_addr = match stream.peer_addr() {
@@ -334,52 +301,37 @@ pub mod receiver {
             let start = Instant::now();
             
             while self.active {
-                if start.elapsed() >= RECEIVE_TIMEOUT {
-                    return Some(Err(Box::new(simple_error::simple_error!("TCP reception for stream {} from {} timed out", self.stream_idx, peer_addr))));
-                }
-                
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
-                let poll_result = self.mio_poll.poll(&mut events, Some(POLL_TIMEOUT));
-                if poll_result.is_err() {
-                    return Some(Err(Box::new(poll_result.unwrap_err())));
-                }
-                for event in events.iter() {
-                    if event.token() == self.mio_poll_token {
-                        loop {
-                            match stream.read(&mut buf) {
-                                Ok(packet_size) => {
-                                    log::trace!("received {} bytes in TCP stream {} from {}", packet_size, self.stream_idx, peer_addr);
-                                    if packet_size == 0 { //test's over
-                                        self.active = false; //HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
-                                        break;
-                                    }
-                                    
-                                    bytes_received += packet_size as u64;
-                                    
-                                    let elapsed_time = start.elapsed();
-                                    if elapsed_time >= super::INTERVAL {
-                                        return Some(Ok(Box::new(super::TcpReceiveResult{
-                                            timestamp: super::get_unix_timestamp(),
-                                            
-                                            stream_idx: self.stream_idx,
-                                            
-                                            duration: elapsed_time.as_secs_f32(),
-                                            
-                                            bytes_received: bytes_received,
-                                        })))
-                                    }
-                                },
-                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
-                                    break;
-                                },
-                                Err(e) => {
-                                    return Some(Err(Box::new(e)));
-                                },
-                            }
+                
+                match stream.read(&mut buf) {
+                    Ok(packet_size) => {
+                        log::trace!("received {} bytes in TCP stream {} from {}", packet_size, self.stream_idx, peer_addr);
+                        if packet_size == 0 { //test's over
+                            self.active = false; //HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
+                            break;
                         }
-                    } else {
-                        log::warn!("got event for unbound token: {:?}", event);
-                    }
+                        
+                        bytes_received += packet_size as u64;
+                        
+                        let elapsed_time = start.elapsed();
+                        if elapsed_time >= super::INTERVAL {
+                            return Some(Ok(Box::new(super::TcpReceiveResult{
+                                timestamp: super::get_unix_timestamp(),
+                                
+                                stream_idx: self.stream_idx,
+                                
+                                duration: elapsed_time.as_secs_f32(),
+                                
+                                bytes_received: bytes_received,
+                            })))
+                        }
+                    },
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //receive timeout
+                        return Some(Err(Box::new(simple_error::simple_error!("TCP reception for stream {} from {} timed out", self.stream_idx, peer_addr))));
+                    },
+                    Err(e) => {
+                        return Some(Err(Box::new(e)));
+                    },
                 }
             }
             if bytes_received > 0 {
@@ -420,16 +372,17 @@ pub mod receiver {
 
 
 pub mod sender {
+    use crate::stream::tcp::KEEPALIVE_DURATION;
     cfg_if::cfg_if! {
         if #[cfg(unix)] { //NOTE: features unsupported on Windows
             use std::os::unix::io::AsRawFd;
         }
     }
     use std::io::Write;
-    use std::net::{IpAddr, SocketAddr};
+    use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::time::{Duration, Instant};
     
-    use mio::net::TcpStream;
+    use socket2::{SockRef, TcpKeepalive};
     
     use std::thread::{sleep};
     
@@ -484,15 +437,17 @@ pub mod sender {
         fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
             log::debug!("preparing to connect TCP stream {}...", self.stream_idx);
             
-            let raw_stream = match std::net::TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
+            let stream = match TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect stream {}: {}", self.stream_idx, e))),
             };
-            raw_stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-            let stream = match TcpStream::from_stream(raw_stream) {
-                Ok(s) => s,
-                Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP stream {}: {}", self.stream_idx, e))),
-            };
+            stream.set_nonblocking(true).expect("unable to make TCP stream non-blocking");
+            stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+            
+            let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+            let raw_socket = SockRef::from(&stream);
+            raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+            
             log::debug!("connected TCP stream {} to {}", self.stream_idx, stream.peer_addr()?);
             
             if self.no_delay {
