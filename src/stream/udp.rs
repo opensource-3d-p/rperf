@@ -255,7 +255,7 @@ pub mod receiver {
              * will remain effectively constant during the testing window
              */
             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
-            let current_timestamp = NaiveDateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos());
+            let current_timestamp = NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos()).unwrap();
             
             let time_delta = current_timestamp - *timestamp;
             
@@ -299,7 +299,7 @@ pub mod receiver {
                 let origin_seconds = i64::from_be_bytes(packet[24..32].try_into().unwrap());
                 //and the following four are the number of nanoseconds since the UNIX epoch
                 let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into().unwrap());
-                let source_timestamp = NaiveDateTime::from_timestamp(origin_seconds, origin_nanoseconds);
+                let source_timestamp = NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).unwrap();
                 
                 history.unbroken_sequence += 1;
                 self.process_jitter(&source_timestamp, &mut history);
