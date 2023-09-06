@@ -32,11 +32,12 @@ use clap::ArgMatches;
 use std::net::{TcpListener, TcpStream};
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
+        use crate::protocol::communication::{KEEPALIVE_DURATION};
         use socket2::{SockRef, TcpKeepalive};
     }
 }
 
-use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
+use crate::protocol::communication::{receive, send};
 
 use crate::protocol::messaging::{
     prepare_connect, prepare_connect_ready,
@@ -320,9 +321,13 @@ pub fn serve(args:ArgMatches) -> BoxResult<()> {
                 
                 stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
                 
-                let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
-                let raw_socket = SockRef::from(&stream);
-                raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+                cfg_if::cfg_if! {
+                    if #[cfg(unix)] {
+                        let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+                        let raw_socket = SockRef::from(&stream);
+                        raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+                    }
+                }
                 
                 let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
                 if client_limit > 0 && client_count > client_limit {

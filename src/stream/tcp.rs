@@ -23,10 +23,14 @@ use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult, 
 use super::{INTERVAL, TestStream, parse_port_spec};
 
 use std::error::Error;
-use std::time::Duration;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
-const KEEPALIVE_DURATION:Duration = Duration::from_secs(5);
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        use std::time::Duration;
+        const KEEPALIVE_DURATION:Duration = Duration::from_secs(5);
+    }
+}
 pub const TEST_HEADER_SIZE:usize = 16;
 
 #[derive(Clone)]
@@ -390,13 +394,13 @@ pub mod receiver {
 
 
 pub mod sender {
-    use crate::stream::tcp::KEEPALIVE_DURATION;
     use std::io::Write;
     use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::time::{Duration, Instant};
     
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
+            use crate::stream::tcp::KEEPALIVE_DURATION;
             use socket2::{SockRef, TcpKeepalive};
         }
     }
@@ -476,8 +480,12 @@ pub mod sender {
                 stream.set_nodelay(true)?;
             }
             if self.send_buffer != 0 {
-                log::debug!("setting send-buffer to {}...", self.send_buffer);
-                raw_socket.set_send_buffer_size(self.send_buffer)?;
+                cfg_if::cfg_if! {
+                    if #[cfg(unix)] {
+                        log::debug!("setting send-buffer to {}...", self.send_buffer);
+                        raw_socket.set_send_buffer_size(self.send_buffer)?;
+                    }
+                }
             }
             Ok(stream)
         }

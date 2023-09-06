@@ -26,9 +26,13 @@ use std::net::{TcpStream};
 use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
-/// how long to wait for keepalive events
-// the communications channels typically exchange data every second, so 2s is reasonable to avoid excess noise
-pub const KEEPALIVE_DURATION:Duration = Duration::from_secs(2);
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        /// how long to wait for keepalive events
+        // the communications channels typically exchange data every second, so 3s is reasonable to avoid excess noise
+        pub const KEEPALIVE_DURATION:Duration = Duration::from_secs(3);
+    }
+}
 
 /// how long to block on polling operations
 const POLL_TIMEOUT:Duration = Duration::from_millis(50);

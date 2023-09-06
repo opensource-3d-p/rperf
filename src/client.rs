@@ -30,11 +30,12 @@ use clap::ArgMatches;
 use std::net::{TcpStream};
 cfg_if::cfg_if! {
     if #[cfg(unix)] {
+        use crate::protocol::communication::{KEEPALIVE_DURATION};
         use socket2::{SockRef, TcpKeepalive};
     }
 }
 
-use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
+use crate::protocol::communication::{receive, send};
 
 use crate::protocol::messaging::{
     prepare_begin, prepare_end,
