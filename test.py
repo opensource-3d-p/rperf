@@ -81,7 +81,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 3.5, delta=1.0)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
         
     def test_tcp_reverse(self):
         result = _run_rperf_client_ipv4((
@@ -98,7 +98,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['config']['additional']['ip_version'], 4)
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 3.5, delta=1.0)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
         
     def test_udp_forward(self):
         result = _run_rperf_client_ipv4((
@@ -116,11 +116,11 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
         self.assertEqual(result['summary']['framed_packet_size'], 1208)
-        self.assertEqual(result['summary']['packets_duplicate'], 0)
+        self.assertEqual(result['summary']['packets_duplicated'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
-        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
         
     def test_udp_reverse(self):
         result = _run_rperf_client_ipv4((
@@ -139,11 +139,11 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
         self.assertEqual(result['summary']['framed_packet_size'], 1208)
-        self.assertEqual(result['summary']['packets_duplicate'], 0)
+        self.assertEqual(result['summary']['packets_duplicated'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
-        self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=50000)
-        self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
+        self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
+        self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
 
 
 
@@ -205,7 +205,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
         self.assertEqual(result['summary']['framed_packet_size'], 1208)
-        self.assertEqual(result['summary']['packets_duplicate'], 0)
+        self.assertEqual(result['summary']['packets_duplicated'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
         self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
@@ -227,7 +227,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertEqual(result['summary']['packets_received'], result['summary']['packets_sent'])
         self.assertEqual(result['summary']['framed_packet_size'], 1208)
-        self.assertEqual(result['summary']['packets_duplicate'], 0)
+        self.assertEqual(result['summary']['packets_duplicated'], 0)
         self.assertEqual(result['summary']['packets_lost'], 0)
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
         self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
