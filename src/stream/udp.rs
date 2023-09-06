@@ -70,7 +70,11 @@ pub mod receiver {
     use chrono::{NaiveDateTime};
     
     use std::net::UdpSocket;
-    use socket2::SockRef;
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            use socket2::SockRef;
+        }
+    }
     
     const READ_TIMEOUT:Duration = Duration::from_millis(50);
     const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
@@ -199,9 +203,13 @@ pub mod receiver {
             let socket:UdpSocket = port_pool.bind(peer_ip).expect(format!("failed to bind UDP socket").as_str());
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
             if *receive_buffer != 0 {
-                log::debug!("setting receive-buffer to {}...", receive_buffer);
-                let raw_socket = SockRef::from(&socket);
-                raw_socket.set_recv_buffer_size(*receive_buffer)?;
+                cfg_if::cfg_if! {
+                    if #[cfg(unix)] {
+                        log::debug!("setting receive-buffer to {}...", receive_buffer);
+                        let raw_socket = SockRef::from(&socket);
+                        raw_socket.set_recv_buffer_size(*receive_buffer)?;
+                    }
+                }
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
             
@@ -433,7 +441,11 @@ pub mod sender {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use std::net::UdpSocket;
-    use socket2::SockRef;
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            use socket2::SockRef;
+        }
+    }
     
     use std::thread::{sleep};
     
@@ -464,9 +476,13 @@ pub mod sender {
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             if *send_buffer != 0 {
-                log::debug!("setting send-buffer to {}...", send_buffer);
-                let raw_socket = SockRef::from(&socket);
-                raw_socket.set_send_buffer_size(*send_buffer)?;
+                cfg_if::cfg_if! {
+                    if #[cfg(unix)] {
+                        log::debug!("setting send-buffer to {}...", send_buffer);
+                        let raw_socket = SockRef::from(&socket);
+                        raw_socket.set_send_buffer_size(*send_buffer)?;
+                    }
+                }
             }
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);

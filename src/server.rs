@@ -30,7 +30,11 @@ use std::time::{Duration};
 use clap::ArgMatches;
 
 use std::net::{TcpListener, TcpStream};
-use socket2::{SockRef, TcpKeepalive};
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        use socket2::{SockRef, TcpKeepalive};
+    }
+}
 
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
@@ -126,7 +130,6 @@ fn handle_client(
                                         test_definition.clone(), &(stream_idx as u8),
                                         &mut c_tcp_port_pool,
                                         &peer_addr.ip(),
-                                        &(payload["receive_buffer"].as_i64().unwrap() as usize),
                                     )?;
                                     stream_ports.push(test.get_port()?);
                                     parallel_streams.push(Arc::new(Mutex::new(test)));

@@ -28,7 +28,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use clap::ArgMatches;
 
 use std::net::{TcpStream};
-use socket2::{SockRef, TcpKeepalive};
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        use socket2::{SockRef, TcpKeepalive};
+    }
+}
 
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
@@ -71,9 +75,13 @@ fn connect_to_server(address:&str, port:&u16) -> BoxResult<TcpStream> {
     log::debug!("connected TCP control-channel to {}", destination);
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
     
-    let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
-    let raw_socket = SockRef::from(&stream);
-    raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+            let raw_socket = SockRef::from(&stream);
+            raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+        }
+    }
     
     log::info!("connected to server");
     
@@ -227,7 +235,6 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     test_definition.clone(), &(stream_idx as u8),
                     &mut tcp_port_pool,
                     &server_addr.ip(),
-                    &(download_config["receive_buffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
