@@ -18,13 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-cfg_if::cfg_if! {
-    if #[cfg(unix)] { //NOTE: features unsupported on Windows
-        extern crate nix;
-        use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
-    }
-}
-
 use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult, get_unix_timestamp};
 
 use super::{INTERVAL, TestStream, parse_port_spec};
@@ -40,7 +33,7 @@ pub const TEST_HEADER_SIZE:usize = 16;
 pub struct TcpTestDefinition {
     //a UUID used to identify packets associated with this test
     pub test_id: [u8; 16],
-    //bandwidth target, in bytes/sec
+    // //bandwidth target, in bytes/sec
     pub bandwidth: u64,
     //the length of the buffer to exchange
     pub length: usize,
@@ -71,11 +64,6 @@ impl TcpTestDefinition {
 
 pub mod receiver {
     use crate::stream::tcp::KEEPALIVE_DURATION;
-    cfg_if::cfg_if! {
-        if #[cfg(unix)] { //NOTE: features unsupported on Windows
-            use std::os::unix::io::AsRawFd;
-        }
-    }
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
     use std::sync::{Mutex};
@@ -196,7 +184,7 @@ pub mod receiver {
         pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port_pool:&mut TcpPortPool, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let listener:TcpListener = port_pool.bind(peer_ip).expect(format!("failed to bind TCP socket").as_str());
-            listener.set_nonblocking(true).expect("unable to make TCP socket non-blocking");
+            listener.set_nonblocking(true)?;
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
             
             Ok(TcpReceiver{
@@ -224,29 +212,24 @@ pub mod receiver {
                 }
                 
                 match listener.accept() {
-                    Ok((stream, address)) => {
+                    Ok((mut stream, address)) => {
                         log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
                         
-                        stream.set_read_timeout(Some(RECEIVE_TIMEOUT)).expect("unable to set TCP read-timeout");
+                        stream.set_read_timeout(Some(RECEIVE_TIMEOUT))?;
+                        let cloned_stream = stream.try_clone()?;
                         
                         let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
-                        let raw_socket = SockRef::from(&stream);
-                        raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+                        let raw_socket = SockRef::from(&cloned_stream);
+                        raw_socket.set_tcp_keepalive(&keepalive_parameters)?;
                         
-                        let mut verification_stream = stream.try_clone()?;
                         let mut buffer = [0_u8; 16];
-                        
-                        match verification_stream.read(&mut buffer) {
+                        match stream.read(&mut buffer) {
                             Ok(_) => {
                                 if buffer == self.test_definition.test_id {
                                     log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
-                                    cfg_if::cfg_if! {
-                                        if #[cfg(unix)] { //NOTE: features unsupported on Windows
-                                            if self.receive_buffer != 0 {
-                                                log::debug!("setting receive-buffer to {}...", self.receive_buffer);
-                                                super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
-                                            }
-                                        }
+                                    if self.receive_buffer != 0 {
+                                        log::debug!("setting receive-buffer to {}...", self.receive_buffer);
+                                        raw_socket.set_recv_buffer_size(self.receive_buffer)?;
                                     }
                                     
                                     return Ok(stream);
@@ -373,11 +356,6 @@ pub mod receiver {
 
 pub mod sender {
     use crate::stream::tcp::KEEPALIVE_DURATION;
-    cfg_if::cfg_if! {
-        if #[cfg(unix)] { //NOTE: features unsupported on Windows
-            use std::os::unix::io::AsRawFd;
-        }
-    }
     use std::io::Write;
     use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::time::{Duration, Instant};
@@ -441,12 +419,12 @@ pub mod sender {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect stream {}: {}", self.stream_idx, e))),
             };
-            stream.set_nonblocking(true).expect("unable to make TCP stream non-blocking");
+            stream.set_nonblocking(true)?;
             stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
             
             let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
             let raw_socket = SockRef::from(&stream);
-            raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+            raw_socket.set_tcp_keepalive(&keepalive_parameters)?;
             
             log::debug!("connected TCP stream {} to {}", self.stream_idx, stream.peer_addr()?);
             
@@ -454,13 +432,9 @@ pub mod sender {
                 log::debug!("setting no-delay...");
                 stream.set_nodelay(true)?;
             }
-            cfg_if::cfg_if! {
-                if #[cfg(unix)] { //NOTE: features unsupported on Windows
-                    if self.send_buffer != 0 {
-                        log::debug!("setting send-buffer to {}...", self.send_buffer);
-                        super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
-                    }
-                }
+            if self.send_buffer != 0 {
+                log::debug!("setting send-buffer to {}...", self.send_buffer);
+                raw_socket.set_send_buffer_size(self.send_buffer)?;
             }
             Ok(stream)
         }

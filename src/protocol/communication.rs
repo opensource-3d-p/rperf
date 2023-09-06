@@ -46,15 +46,14 @@ pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> 
 
 /// receives the length-count of a pending message over a client-server communications stream
 fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool, results_handler:&mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
-    let mut cloned_stream = stream.try_clone()?;
-    cloned_stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
+    stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
     
     let mut length_bytes_read = 0;
     let mut length_spec:[u8; 2] = [0; 2];
     while alive_check() { //waiting to find out how long the next message is
         results_handler()?; //send any outstanding results between cycles
         
-        match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
+        match stream.read(&mut length_spec[length_bytes_read..]) {
             Ok(size) => {
                 if size == 0 {
                     if alive_check() {
@@ -85,15 +84,14 @@ fn receive_length(stream:&mut TcpStream, alive_check:fn() -> bool, results_handl
 }
 /// receives the data-value of a pending message over a client-server communications stream
 fn receive_payload(stream:&mut TcpStream, alive_check:fn() -> bool, results_handler:&mut dyn FnMut() -> BoxResult<()>, length:u16) -> BoxResult<serde_json::Value> {
-    let mut cloned_stream = stream.try_clone()?;
-    cloned_stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
+    stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
     
     let mut bytes_read = 0;
     let mut buffer = vec![0_u8; length.into()];
     while alive_check() { //waiting to receive the payload
         results_handler()?; //send any outstanding results between cycles
         
-        match cloned_stream.read(&mut buffer[bytes_read..]) {
+        match stream.read(&mut buffer[bytes_read..]) {
             Ok(size) => {
                 if size == 0 {
                     if alive_check() {
