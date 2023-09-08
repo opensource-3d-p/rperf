@@ -212,7 +212,7 @@ pub mod receiver {
             })
         }
         
-        fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
+        fn process_connection(&mut self) -> super::BoxResult<(TcpStream, u64, f32)> {
             log::debug!("preparing to receive TCP stream {} connection...", self.stream_idx);
             
             let listener = self.listener.as_mut().unwrap();
@@ -256,29 +256,49 @@ pub mod receiver {
                     let mut unwrapped_stream = stream.unwrap();
                     
                     //process the stream
-                    let mut buffer = [0_u8; 16];
+                    let mut buf = vec![0_u8; self.test_definition.length];
+                    let mut validated:bool = false;
+                    let mut bytes_received:u64 = 0;
+                    
+                    let start_validation = Instant::now();
+                    
                     self.mio_poll.poll(&mut self.mio_events, Some(CONNECTION_TIMEOUT))?;
                     for event in self.mio_events.iter() {
-                        match event.token() {
-                            _ => match unwrapped_stream.read(&mut buffer) {
-                                Ok(_) => {
-                                    if buffer == self.test_definition.test_id {
-                                        log::debug!("validated TCP stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
+                        if event.token() == mio_token {
+                            loop {
+                                match unwrapped_stream.read(&mut buf) {
+                                    Ok(packet_size) => {
+                                        if !validated {
+                                            if buf[..16] == self.test_definition.test_id {
+                                                log::debug!("validated TCP stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
+                                                validated = true;
+                                            } else {
+                                                log::warn!("unexpected ID in stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
+                                                break;
+                                            }
+                                        }
                                         
-                                        return Ok(unwrapped_stream);
-                                    }
-                                },
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //client didn't provide anything
-                                    let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
-                                },
-                                Err(e) => {
-                                    let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
-                                    self.mio_poll.registry().deregister(&mut unwrapped_stream)?;
-                                    return Err(Box::new(e));
-                                },
-                            },
+                                        if validated {
+                                            bytes_received += packet_size as u64;
+                                        }
+                                    },
+                                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //end of input reached
+                                        break;
+                                    },
+                                    Err(e) => {
+                                        let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
+                                        self.mio_poll.registry().deregister(&mut unwrapped_stream)?;
+                                        return Err(Box::new(e));
+                                    },
+                                }
+                            }
                         }
                     }
+                    if validated {
+                        return Ok((unwrapped_stream, bytes_received, start_validation.elapsed().as_secs_f32()));
+                    }
+                    
+                    let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
                     self.mio_poll.registry().deregister(&mut unwrapped_stream)?;
                     log::warn!("could not validate TCP stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
                 }
@@ -290,12 +310,14 @@ pub mod receiver {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let mut bytes_received:u64 = 0;
             
+            let mut additional_time_elapsed:f32 = 0.0;
             if self.stream.is_none() { //if still in the setup phase, receive the sender
                 match self.process_connection() {
-                    Ok(stream) => {
+                    Ok((stream, bytes_received_in_validation, time_spent_in_validation)) => {
                         self.stream = Some(stream);
-                        //NOTE: the connection process consumes the test-header; account for those bytes
-                        bytes_received += super::TEST_HEADER_SIZE as u64;
+                        //NOTE: the connection process consumes packets; account for those bytes
+                        bytes_received += bytes_received_in_validation;
+                        additional_time_elapsed += time_spent_in_validation;
                     },
                     Err(e) => {
                         return Some(Err(e));
@@ -314,16 +336,12 @@ pub mod receiver {
             };
             let start = Instant::now();
             
-            while self.active {
-                if start.elapsed() >= RECEIVE_TIMEOUT {
-                    return Some(Err(Box::new(simple_error::simple_error!("TCP reception for stream {} from {} timed out", self.stream_idx, peer_addr))));
-                }
-                
+            while self.active && start.elapsed() < super::INTERVAL {
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
                 self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
                 for event in self.mio_events.iter() {
                     if event.token() == mio_token {
-                        loop  {
+                        loop {
                             match stream.read(&mut buf) {
                                 Ok(packet_size) => {
                                     log::trace!("received {} bytes in TCP stream {} from {}", packet_size, self.stream_idx, peer_addr);
@@ -333,20 +351,6 @@ pub mod receiver {
                                     }
                                     
                                     bytes_received += packet_size as u64;
-                                    
-                                    let elapsed_time = start.elapsed();
-                                    if elapsed_time >= super::INTERVAL {
-                                        log::debug!("{} bytes received via TCP stream {} from {} in this interval; reporting...", bytes_received, self.stream_idx, peer_addr);
-                                        return Some(Ok(Box::new(super::TcpReceiveResult{
-                                            timestamp: super::get_unix_timestamp(),
-                                            
-                                            stream_idx: self.stream_idx,
-                                            
-                                            duration: elapsed_time.as_secs_f32(),
-                                            
-                                            bytes_received: bytes_received,
-                                        })))
-                                    }
                                 },
                                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //receive timeout
                                     break;
@@ -368,7 +372,7 @@ pub mod receiver {
                     
                     stream_idx: self.stream_idx,
                     
-                    duration: start.elapsed().as_secs_f32(),
+                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
                     
                     bytes_received: bytes_received,
                 })))

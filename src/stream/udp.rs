@@ -76,7 +76,6 @@ pub mod receiver {
     }
     
     const READ_TIMEOUT:Duration = Duration::from_millis(50);
-    const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
     
     pub struct UdpPortPool {
         pub ports_ip4: Vec<u16>,
@@ -338,11 +337,7 @@ pub mod receiver {
             
             let start = Instant::now();
             
-            while self.active {
-                if start.elapsed() >= RECEIVE_TIMEOUT {
-                    return Some(Err(Box::new(simple_error::simple_error!("UDP reception for stream {} timed out, likely because the end-signal was lost", self.stream_idx))));
-                }
-                
+            while self.active && start.elapsed() < super::INTERVAL {
                 log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
                 loop {
                     match self.socket.recv_from(&mut buf) {
@@ -362,27 +357,6 @@ pub mod receiver {
                             if self.process_packet(&buf, &mut history) {
                                 //NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
                                 bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
-                                
-                                let elapsed_time = start.elapsed();
-                                if elapsed_time >= super::INTERVAL {
-                                    log::debug!("{} bytes received via UDP stream {} from {} in this interval; reporting...", bytes_received, self.stream_idx, peer_addr);
-                                    return Some(Ok(Box::new(super::UdpReceiveResult{
-                                        timestamp: super::get_unix_timestamp(),
-                                        
-                                        stream_idx: self.stream_idx,
-                                        
-                                        duration: elapsed_time.as_secs_f32(),
-                                        
-                                        bytes_received: bytes_received,
-                                        packets_received: history.packets_received,
-                                        packets_lost: history.packets_lost,
-                                        packets_out_of_order: history.packets_out_of_order,
-                                        packets_duplicated: history.packets_duplicated,
-                                        
-                                        unbroken_sequence: history.longest_unbroken_sequence,
-                                        jitter_seconds: history.longest_jitter_seconds,
-                                    })))
-                                }
                             } else {
                                 log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
                                 continue;
