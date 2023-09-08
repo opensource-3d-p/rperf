@@ -19,7 +19,7 @@
  */
 
 use std::io::{self, Read, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use std::net::{TcpStream};
 
@@ -37,15 +37,40 @@ cfg_if::cfg_if! {
 /// how long to block on polling operations
 const POLL_TIMEOUT:Duration = Duration::from_millis(50);
 
+/// how long to allow for send-operations to complete
+const SEND_TIMEOUT:Duration = Duration::from_secs(5);
+
 /// sends JSON data over a client-server communications stream
 pub fn send(stream:&mut TcpStream, message:&serde_json::Value) -> BoxResult<()> {
+    stream.set_write_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP write-timeout");
+    
     let serialised_message = serde_json::to_vec(message)?;
     
     log::debug!("sending message of length {}, {:?}, to {}...", serialised_message.len(), message, stream.peer_addr()?);
     let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
     output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());
-    Ok(stream.write_all(&output_buffer)?)
+    
+    let start = Instant::now();
+    let mut total_bytes_written:usize = 0;
+    
+    while start.elapsed() < SEND_TIMEOUT {
+        match stream.write(&output_buffer[total_bytes_written..]) {
+            Ok(bytes_written) => {
+                total_bytes_written += bytes_written;
+                if total_bytes_written == output_buffer.len() {
+                    return Ok(())
+                }
+            },
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                //unable to write at the moment; keep trying until the full timeout is reached
+            },
+            Err(e) => {
+                return Err(Box::new(e));
+            },
+        }
+    }
+    return Err(Box::new(simple_error::simple_error!("timed out while attempting to send status-message to {}", stream.peer_addr()?)));
 }
 
 /// receives the length-count of a pending message over a client-server communications stream

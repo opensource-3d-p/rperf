@@ -63,13 +63,12 @@ impl UdpTestDefinition {
 
 pub mod receiver {
     use std::convert::TryInto;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
     use std::sync::{Mutex};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
     
     use chrono::{NaiveDateTime};
     
-    use std::net::UdpSocket;
     cfg_if::cfg_if! {
         if #[cfg(unix)] {
             use socket2::SockRef;
@@ -366,6 +365,7 @@ pub mod receiver {
                                 
                                 let elapsed_time = start.elapsed();
                                 if elapsed_time >= super::INTERVAL {
+                                    log::debug!("{} bytes received via UDP stream {} from {} in this interval; reporting...", bytes_received, self.stream_idx, peer_addr);
                                     return Some(Ok(Box::new(super::UdpReceiveResult{
                                         timestamp: super::get_unix_timestamp(),
                                         
@@ -388,7 +388,7 @@ pub mod receiver {
                                 continue;
                             }
                         },
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //receive timeout
                             break;
                         },
                         Err(e) => {
@@ -398,6 +398,7 @@ pub mod receiver {
                 }
             }
             if bytes_received > 0 {
+                log::debug!("{} bytes received via UDP stream {} in this interval; reporting...", bytes_received, self.stream_idx);
                 Some(Ok(Box::new(super::UdpReceiveResult{
                     timestamp: super::get_unix_timestamp(),
                     
@@ -415,6 +416,7 @@ pub mod receiver {
                     jitter_seconds: history.longest_jitter_seconds,
                 })))
             } else {
+                log::debug!("no bytes received via UDP stream {} in this interval", self.stream_idx);
                 None
             }
         }
@@ -557,6 +559,7 @@ pub mod sender {
                         if elapsed_time >= super::INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
+                            log::debug!("{} bytes sent via UDP stream {} in this interval; reporting...", bytes_sent, self.stream_idx);
                             return Some(Ok(Box::new(super::UdpSendResult{
                                 timestamp: super::get_unix_timestamp(),
                                 
@@ -597,6 +600,7 @@ pub mod sender {
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
             }
             if bytes_sent > 0 {
+                log::debug!("{} bytes sent via UDP stream {} in this interval; reporting...", bytes_sent, self.stream_idx);
                 Some(Ok(Box::new(super::UdpSendResult{
                     timestamp: super::get_unix_timestamp(),
                     
@@ -609,6 +613,7 @@ pub mod sender {
                     sends_blocked: sends_blocked,
                 })))
             } else {
+                log::debug!("no bytes sent via UDP stream {} in this interval; shutting down...", self.stream_idx);
                 //indicate that the test is over by sending the test ID by itself
                 let mut remaining_announcements = 5;
                 while remaining_announcements > 0 { //do it a few times in case of loss
