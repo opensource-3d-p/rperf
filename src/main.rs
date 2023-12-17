@@ -1,33 +1,33 @@
 /*
  * Copyright (C) 2021 Evtech Solutions, Ltd., dba 3D-P
  * Copyright (C) 2021 Neil Tallim <neiltallim@3d-p.com>
- * 
+ *
  * This file is part of rperf.
- * 
+ *
  * rperf is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * rperf is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
- 
-extern crate log;
+
 extern crate env_logger;
+extern crate log;
 
 use clap::{App, Arg};
 
+mod client;
 mod protocol;
+mod server;
 mod stream;
 mod utils;
-mod client;
-mod server;
 
 fn main() {
     let args = App::new("rperf")
@@ -44,7 +44,6 @@ fn main() {
                 .required(false)
                 .default_value("5199")
         )
-        
         .arg(
             Arg::with_name("affinity")
                 .help("specify logical CPUs, delimited by commas, across which to round-robin affinity; not supported on all systems")
@@ -63,8 +62,6 @@ fn main() {
                 .short("d")
                 .required(false)
         )
-        
-        
         .arg(
             Arg::with_name("server")
                 .help("run in server mode")
@@ -89,7 +86,6 @@ fn main() {
                 .required(false)
                 .default_value("0")
         )
-        
         .arg(
             Arg::with_name("client")
                 .help("run in client mode; value is the server's address")
@@ -234,25 +230,27 @@ fn main() {
                 .default_value("")
         )
     .get_matches();
-    
-    let mut env = env_logger::Env::default()
-        .filter_or("RUST_LOG", "info");
+
+    let mut env = env_logger::Env::default().filter_or("RUST_LOG", "info");
     if args.is_present("debug") {
         env = env.filter_or("RUST_LOG", "debug");
     }
     env_logger::init_from_env(env);
-    
+
     if args.is_present("server") {
         log::debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if server::kill() {
-                log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
+                log::warn!(
+                    "shutdown requested; please allow a moment for any in-progress tests to stop"
+                );
             } else {
                 log::warn!("forcing shutdown immediately");
                 std::process::exit(3);
             }
-        }).expect("unable to set SIGINT handler");
-        
+        })
+        .expect("unable to set SIGINT handler");
+
         log::debug!("beginning normal operation...");
         let service = server::serve(args);
         if service.is_err() {
@@ -263,13 +261,16 @@ fn main() {
         log::debug!("registering SIGINT handler...");
         ctrlc::set_handler(move || {
             if client::kill() {
-                log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
+                log::warn!(
+                    "shutdown requested; please allow a moment for any in-progress tests to stop"
+                );
             } else {
                 log::warn!("forcing shutdown immediately");
                 std::process::exit(3);
             }
-        }).expect("unable to set SIGINT handler");
-        
+        })
+        .expect("unable to set SIGINT handler");
+
         log::debug!("connecting to server...");
         let execution = client::execute(args);
         if execution.is_err() {

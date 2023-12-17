@@ -1,0 +1,33 @@
+name: Rust
+
+on:
+  [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        host_os:
+          - ubuntu-latest
+          - macos-latest
+          # - windows-latest
+
+    runs-on: ${{ matrix.host_os }}
+
+    steps:
+    - uses: actions/checkout@v3
+    - name: check
+      run: cargo check
+    - name: rustfmt
+      run: |
+        rustc --version
+        cargo fmt --all -- --check
+    - name: clippy
+      run: cargo clippy -- -D warnings
+    - name: Build
+      run: cargo build --verbose --all-features --tests --examples
+    - name: Run tests
+      run: cargo test --verbose
