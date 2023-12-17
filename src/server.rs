@@ -401,15 +401,22 @@ pub fn serve(args: ArgMatches) -> BoxResult<()> {
         log::debug!("limiting service to {} concurrent clients", client_limit);
     }
 
+    let (unspec_str, unspec) = if args.is_present("version6") {
+        ("::", IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+    } else {
+        ("0.0.0.0", IpAddr::V4(Ipv4Addr::UNSPECIFIED))
+    };
+
+    let addr = args
+        .value_of("bind")
+        .unwrap_or(unspec_str)
+        .parse::<IpAddr>()
+        .unwrap_or(unspec);
+
     //start listening for connections
     let port: u16 = args.value_of("port").unwrap().parse()?;
-    let listener: TcpListener = if args.is_present("version6") {
-        TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port))
-            .unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port))
-    } else {
-        TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port))
-            .unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port))
-    };
+    let listener: TcpListener = TcpListener::bind(&SocketAddr::new(addr, port))
+        .unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
     log::info!("server listening on {}", listener.local_addr()?);
 
     let mio_token = Token(0);

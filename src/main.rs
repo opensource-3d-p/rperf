@@ -55,6 +55,17 @@ fn main() {
                 .default_value("")
         )
         .arg(
+            Arg::with_name("bind")
+                .help("bind to the interface associated with the address <host>")
+                .takes_value(true)
+                .long("bind")
+                .short("B")
+                .value_name("host")
+                .required(false)
+                .multiple(true)
+                .default_value("0.0.0.0")
+        )
+        .arg(
             Arg::with_name("debug")
                 .help("emit debug-level logging on stderr; default is info and above")
                 .takes_value(false)
