@@ -20,18 +20,17 @@
 
 use std::error::Error;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
+use std::net::{Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use clap::ArgMatches;
-
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Poll, PollOpt, Ready, Token};
 
+use crate::args::Args;
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
 use crate::protocol::messaging::{prepare_connect, prepare_connect_ready};
@@ -381,41 +380,29 @@ impl Drop for ClientThreadMonitor {
     }
 }
 
-pub fn serve(args: ArgMatches) -> BoxResult<()> {
+pub fn serve(args: &Args) -> BoxResult<()> {
     //config-parsing and pre-connection setup
     let tcp_port_pool = Arc::new(Mutex::new(tcp::receiver::TcpPortPool::new(
-        args.value_of("tcp_port_pool").unwrap().to_string(),
-        args.value_of("tcp6_port_pool").unwrap().to_string(),
+        args.tcp_port_pool.to_string(),
+        args.tcp6_port_pool.to_string(),
     )));
     let udp_port_pool = Arc::new(Mutex::new(udp::receiver::UdpPortPool::new(
-        args.value_of("udp_port_pool").unwrap().to_string(),
-        args.value_of("udp6_port_pool").unwrap().to_string(),
+        args.udp_port_pool.to_string(),
+        args.udp6_port_pool.to_string(),
     )));
 
     let cpu_affinity_manager = Arc::new(Mutex::new(
-        crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?,
+        crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?,
     ));
 
-    let client_limit: u16 = args.value_of("client_limit").unwrap().parse()?;
+    let client_limit: u16 = args.client_limit as u16;
     if client_limit > 0 {
         log::debug!("limiting service to {} concurrent clients", client_limit);
     }
 
-    let (unspec_str, unspec) = if args.is_present("version6") {
-        ("::", IpAddr::V6(Ipv6Addr::UNSPECIFIED))
-    } else {
-        ("0.0.0.0", IpAddr::V4(Ipv4Addr::UNSPECIFIED))
-    };
-
-    let addr = args
-        .value_of("bind")
-        .unwrap_or(unspec_str)
-        .parse::<IpAddr>()
-        .unwrap_or(unspec);
-
     //start listening for connections
-    let port: u16 = args.value_of("port").unwrap().parse()?;
-    let listener: TcpListener = TcpListener::bind(&SocketAddr::new(addr, port))
+    let port: u16 = args.port;
+    let listener: TcpListener = TcpListener::bind(&SocketAddr::new(args.bind, port))
         .unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
     log::info!("server listening on {}", listener.local_addr()?);
 

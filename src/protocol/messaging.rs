@@ -198,17 +198,17 @@ fn calculate_length_udp(length: u16) -> u16 {
 
 /// prepares a message used to describe the upload role in a test
 pub fn prepare_upload_configuration(
-    args: &clap::ArgMatches,
+    args: &crate::args::Args,
     test_id: &[u8; 16],
 ) -> BoxResult<serde_json::Value> {
-    let parallel_streams: u8 = args.value_of("parallel").unwrap().parse()?;
-    let mut seconds: f32 = args.value_of("time").unwrap().parse()?;
-    let mut send_interval: f32 = args.value_of("send_interval").unwrap().parse()?;
-    let mut length: u32 = args.value_of("length").unwrap().parse()?;
+    let parallel_streams: u8 = args.parallel as u8;
+    let mut seconds: f32 = args.time as f32;
+    let mut send_interval: f32 = args.send_interval as f32;
+    let mut length: u32 = args.length as u32;
 
-    let mut send_buffer: u32 = args.value_of("send_buffer").unwrap().parse()?;
+    let mut send_buffer: u32 = args.send_buffer as u32;
 
-    let mut bandwidth_string = args.value_of("bandwidth").unwrap();
+    let mut bandwidth_string = args.bandwidth.as_str();
     let bandwidth: u64;
     let bandwidth_multiplier: f64;
     match bandwidth_string.chars().last() {
@@ -256,7 +256,7 @@ pub fn prepare_upload_configuration(
                     //invalid input; fall back to 1mbps
                     log::warn!(
                         "invalid bandwidth: {}; setting value to 1mbps",
-                        args.value_of("bandwidth").unwrap()
+                        args.bandwidth
                     );
                     bandwidth = 125000;
                 }
@@ -266,7 +266,7 @@ pub fn prepare_upload_configuration(
             //invalid input; fall back to 1mbps
             log::warn!(
                 "invalid bandwidth: {}; setting value to 1mbps",
-                args.value_of("bandwidth").unwrap()
+                args.bandwidth
             );
             bandwidth = 125000;
         }
@@ -282,7 +282,7 @@ pub fn prepare_upload_configuration(
         send_interval = 0.05
     }
 
-    if args.is_present("udp") {
+    if args.udp {
         log::debug!("preparing UDP upload config...");
         if length == 0 {
             length = 1024;
@@ -310,7 +310,7 @@ pub fn prepare_upload_configuration(
             send_buffer = length * 2;
         }
 
-        let no_delay: bool = args.is_present("no_delay");
+        let no_delay: bool = args.no_delay;
 
         Ok(prepare_configuration_tcp_upload(
             test_id,
@@ -326,14 +326,14 @@ pub fn prepare_upload_configuration(
 }
 /// prepares a message used to describe the download role in a test
 pub fn prepare_download_configuration(
-    args: &clap::ArgMatches,
+    args: &crate::args::Args,
     test_id: &[u8; 16],
 ) -> BoxResult<serde_json::Value> {
-    let parallel_streams: u8 = args.value_of("parallel").unwrap().parse()?;
-    let mut length: u32 = args.value_of("length").unwrap().parse()?;
-    let mut receive_buffer: u32 = args.value_of("receive_buffer").unwrap().parse()?;
+    let parallel_streams: u8 = args.parallel as u8;
+    let mut length: u32 = args.length as u32;
+    let mut receive_buffer: u32 = args.receive_buffer as u32;
 
-    if args.is_present("udp") {
+    if args.udp {
         log::debug!("preparing UDP download config...");
         if length == 0 {
             length = 1024;

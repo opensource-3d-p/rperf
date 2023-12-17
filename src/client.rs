@@ -25,10 +25,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use clap::ArgMatches;
-
 use mio::net::TcpStream;
 
+use crate::args;
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 
 use crate::protocol::messaging::{
@@ -115,56 +114,48 @@ fn prepare_test_results(is_udp: bool, stream_count: u8) -> Mutex<Box<dyn TestRes
     }
 }
 
-pub fn execute(args: ArgMatches) -> BoxResult<()> {
+pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut complete = false;
 
     //config-parsing and pre-connection setup
     let mut tcp_port_pool = tcp::receiver::TcpPortPool::new(
-        args.value_of("tcp_port_pool").unwrap().to_string(),
-        args.value_of("tcp6_port_pool").unwrap().to_string(),
+        args.tcp_port_pool.to_string(),
+        args.tcp6_port_pool.to_string(),
     );
     let mut udp_port_pool = udp::receiver::UdpPortPool::new(
-        args.value_of("udp_port_pool").unwrap().to_string(),
-        args.value_of("udp6_port_pool").unwrap().to_string(),
+        args.udp_port_pool.to_string(),
+        args.udp6_port_pool.to_string(),
     );
 
     let cpu_affinity_manager = Arc::new(Mutex::new(
-        crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?,
+        crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?,
     ));
 
     let display_json: bool;
     let display_bit: bool;
-    match args.value_of("format").unwrap() {
-        "json" => {
+    match args.format {
+        args::Format::Json => {
             display_json = true;
             display_bit = false;
         }
-        "megabit" => {
+        args::Format::Megabit => {
             display_json = false;
             display_bit = true;
         }
-        "megabyte" => {
+        args::Format::Megabyte => {
             display_json = false;
-            display_bit = false;
-        }
-        _ => {
-            log::error!("unsupported display-mode; defaulting to JSON");
-            display_json = true;
             display_bit = false;
         }
     }
 
-    let is_udp = args.is_present("udp");
+    let is_udp = args.udp;
 
     let test_id = uuid::Uuid::new_v4();
-    let mut upload_config = prepare_upload_configuration(&args, test_id.as_bytes())?;
-    let mut download_config = prepare_download_configuration(&args, test_id.as_bytes())?;
+    let mut upload_config = prepare_upload_configuration(args, test_id.as_bytes())?;
+    let mut download_config = prepare_download_configuration(args, test_id.as_bytes())?;
 
     //connect to the server
-    let mut stream = connect_to_server(
-        args.value_of("client").unwrap(),
-        &(args.value_of("port").unwrap().parse()?),
-    )?;
+    let mut stream = connect_to_server(&args.client.unwrap().to_string(), &args.port)?;
     let server_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this test
@@ -224,7 +215,7 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
     };
 
     //depending on whether this is a forward- or reverse-test, the order of configuring test-streams will differ
-    if args.is_present("reverse") {
+    if args.reverse {
         log::debug!("running in reverse-mode: server will be uploading data");
 
         //when we're receiving data, we're also responsible for letting the server know where to send it
@@ -559,7 +550,7 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
     }
 
     log::debug!("displaying test results");
-    let omit_seconds: usize = args.value_of("omit").unwrap().parse()?;
+    let omit_seconds: usize = args.omit;
     {
         let tr = test_results.lock().unwrap();
         if display_json {
@@ -576,7 +567,7 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
                             IpAddr::V4(_) => 4,
                             IpAddr::V6(_) => 6,
                         },
-                        "reverse": args.is_present("reverse"),
+                        "reverse": args.reverse,
                     })
                 )
             );
