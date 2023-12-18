@@ -60,15 +60,26 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
     if server_addr.is_none() {
         return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
     }
-    let raw_stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
+    let stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
         Ok(s) => s,
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
     };
-    let stream = TcpStream::from_std(raw_stream);
-    log::info!("connected to server");
 
-    stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-    stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+    let stream = {
+        let socket: socket2::Socket = socket2::Socket::from(stream);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(KEEPALIVE_DURATION)
+            .with_interval(KEEPALIVE_DURATION)
+            .with_retries(4);
+        socket.set_tcp_keepalive(&keepalive)?;
+        socket.set_nodelay(true)?;
+
+        let stream: std::net::TcpStream = socket.into();
+
+        TcpStream::from_std(stream)
+    };
+
+    log::info!("connected to server");
 
     Ok(stream)
 }

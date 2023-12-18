@@ -330,7 +330,7 @@ pub fn serve(args: &Args) -> BoxResult<()> {
         for event in events.iter() {
             event.token();
             loop {
-                let (mut stream, address) = match listener.accept() {
+                let (stream, address) = match listener.accept() {
                     Ok((stream, address)) => (stream, address),
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         // nothing to do
@@ -343,8 +343,22 @@ pub fn serve(args: &Args) -> BoxResult<()> {
 
                 log::info!("connection from {}", address);
 
-                stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-                stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+                let mut stream = {
+                    use std::os::fd::{FromRawFd, IntoRawFd};
+                    let fd = stream.into_raw_fd();
+                    let socket: socket2::Socket = unsafe { socket2::Socket::from_raw_fd(fd) };
+
+                    let keepalive = socket2::TcpKeepalive::new()
+                        .with_time(KEEPALIVE_DURATION)
+                        .with_interval(KEEPALIVE_DURATION)
+                        .with_retries(4);
+                    socket.set_tcp_keepalive(&keepalive)?;
+
+                    socket.set_nodelay(true)?;
+
+                    let stream: std::net::TcpStream = socket.into();
+                    mio::net::TcpStream::from_std(stream)
+                };
 
                 let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
                 if client_limit > 0 && client_count > client_limit {

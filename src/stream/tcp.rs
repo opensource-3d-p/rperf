@@ -79,8 +79,6 @@ impl TcpTestDefinition {
 pub mod receiver {
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::fd::FromRawFd;
-    use std::os::unix::io::AsRawFd;
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -293,12 +291,16 @@ pub mod receiver {
 
                             if buffer == self.test_definition.test_id {
                                 log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
-                                if !cfg!(windows) {
-                                    // NOTE: features unsupported on Windows
-                                    if self.receive_buffer != 0 {
-                                        log::debug!("setting receive-buffer to {}...", self.receive_buffer);
-                                        super::setsockopt(&stream, super::RcvBuf, &self.receive_buffer)?;
-                                    }
+
+                                // NOTE: features unsupported on Windows
+                                #[cfg(not(windows))]
+                                if self.receive_buffer != 0 {
+                                    log::debug!("setting receive-buffer to {}...", self.receive_buffer);
+
+                                    use std::os::fd::{FromRawFd, IntoRawFd};
+                                    let raw_stream = unsafe { std::net::TcpStream::from_raw_fd(stream.into_raw_fd()) };
+                                    super::setsockopt(&raw_stream, super::RcvBuf, &self.receive_buffer)?;
+                                    stream = unsafe { TcpStream::from_raw_fd(raw_stream.into_raw_fd()) };
                                 }
 
                                 self.mio_poll
@@ -442,8 +444,6 @@ pub mod receiver {
 pub mod sender {
     use std::io::Write;
     use std::net::{IpAddr, SocketAddr};
-    use std::os::fd::FromRawFd;
-    use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant};
 
     use mio::net::TcpStream;
@@ -522,6 +522,14 @@ pub mod sender {
                     )))
                 }
             };
+
+            // NOTE: features unsupported on Windows
+            #[cfg(not(windows))]
+            if self.send_buffer != 0 {
+                log::debug!("setting send-buffer to {}...", self.send_buffer);
+                super::setsockopt(&raw_stream, super::SndBuf, &self.send_buffer)?;
+            }
+
             raw_stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
             let stream = TcpStream::from_std(raw_stream);
             log::debug!("connected TCP stream {} to {}", self.stream_idx, stream.peer_addr()?);
@@ -529,13 +537,6 @@ pub mod sender {
             if self.no_delay {
                 log::debug!("setting no-delay...");
                 stream.set_nodelay(true)?;
-            }
-            if !cfg!(windows) {
-                //NOTE: features unsupported on Windows
-                if self.send_buffer != 0 {
-                    log::debug!("setting send-buffer to {}...", self.send_buffer);
-                    super::setsockopt(&stream, super::SndBuf, &self.send_buffer)?;
-                }
             }
             Ok(stream)
         }
