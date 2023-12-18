@@ -24,7 +24,8 @@ fn main() {
     use clap::Parser;
     let args = args::Args::parse();
 
-    let mut env = env_logger::Env::default().filter_or("RUST_LOG", "info");
+    let default = args.verbosity.to_string();
+    let mut env = env_logger::Env::default().filter_or("RUST_LOG", &default);
     if args.debug {
         env = env.filter_or("RUST_LOG", "debug");
     }

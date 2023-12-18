@@ -127,6 +127,10 @@ pub struct Args {
     /// if omitted, any OS-assignable port is used; format: 1-10,19,21
     #[arg(long, value_name = "ports", default_value = "")]
     pub udp6_port_pool: String,
+
+    /// Verbosity level
+    #[arg(short, long, value_name = "level", value_enum, default_value = "info")]
+    pub verbosity: ArgVerbosity,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum, Default)]
@@ -143,6 +147,30 @@ impl std::fmt::Display for Format {
             Format::Json => write!(f, "json"),
             Format::Megabit => write!(f, "megabit/sec"),
             Format::Megabyte => write!(f, "megabyte/sec"),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum)]
+pub enum ArgVerbosity {
+    Off,
+    Error,
+    Warn,
+    #[default]
+    Info,
+    Debug,
+    Trace,
+}
+
+impl std::fmt::Display for ArgVerbosity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArgVerbosity::Off => write!(f, "off"),
+            ArgVerbosity::Error => write!(f, "error"),
+            ArgVerbosity::Warn => write!(f, "warn"),
+            ArgVerbosity::Info => write!(f, "info"),
+            ArgVerbosity::Debug => write!(f, "debug"),
+            ArgVerbosity::Trace => write!(f, "trace"),
         }
     }
 }
