@@ -28,7 +28,7 @@ use std::thread;
 use std::time::Duration;
 
 use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Interest, Poll, Token};
 
 use crate::args::Args;
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
@@ -316,13 +316,13 @@ pub fn serve(args: &Args) -> BoxResult<()> {
 
     //start listening for connections
     let port: u16 = args.port;
-    let listener: TcpListener =
-        TcpListener::bind(&SocketAddr::new(args.bind, port)).unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
+    let mut listener =
+        TcpListener::bind(SocketAddr::new(args.bind, port)).unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
     log::info!("server listening on {}", listener.local_addr()?);
 
     let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(&listener, mio_token, Ready::readable(), PollOpt::edge())?;
+    let mut poll = Poll::new()?;
+    poll.registry().register(&mut listener, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(32);
 
     while is_alive() {

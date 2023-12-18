@@ -18,9 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-extern crate log;
-extern crate nix;
-
 use std::error::Error;
 
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
@@ -84,7 +81,6 @@ impl UdpTestDefinition {
 pub mod receiver {
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::sync::Mutex;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -238,7 +234,7 @@ pub mod receiver {
                 //NOTE: features unsupported on Windows
                 if *receive_buffer != 0 {
                     log::debug!("setting receive-buffer to {}...", receive_buffer);
-                    super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
+                    super::setsockopt(&socket, super::RcvBuf, receive_buffer)?;
                 }
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
@@ -498,7 +494,6 @@ pub mod receiver {
 
 pub mod sender {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use std::net::UdpSocket;
@@ -547,7 +542,7 @@ pub mod sender {
                 //NOTE: features unsupported on Windows
                 if *send_buffer != 0 {
                     log::debug!("setting send-buffer to {}...", send_buffer);
-                    super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
+                    super::setsockopt(&socket, super::SndBuf, send_buffer)?;
                 }
             }
             socket.connect(socket_addr_receiver)?;

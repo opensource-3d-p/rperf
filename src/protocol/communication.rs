@@ -22,7 +22,7 @@ use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use mio::net::TcpStream;
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Interest, Poll, Token};
 
 use std::error::Error;
 type BoxResult<T> = Result<T, Box<dyn Error>>;
@@ -52,11 +52,9 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
 
 /// receives the length-count of a pending message over a client-server communications stream
 fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_handler: &mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
-    let mut cloned_stream = stream.try_clone()?;
-
     let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(&cloned_stream, mio_token, Ready::readable(), PollOpt::edge())?;
+    let mut poll = Poll::new()?;
+    poll.registry().register(stream, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(1); //only interacting with one stream
 
     let mut length_bytes_read = 0;
@@ -68,7 +66,7 @@ fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_han
         for event in events.iter() {
             event.token();
             loop {
-                let size = match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
+                let size = match stream.read(&mut length_spec[length_bytes_read..]) {
                     Ok(size) => size,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         //nothing left to process
@@ -108,11 +106,9 @@ fn receive_payload(
     results_handler: &mut dyn FnMut() -> BoxResult<()>,
     length: u16,
 ) -> BoxResult<serde_json::Value> {
-    let mut cloned_stream = stream.try_clone()?;
-
     let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(&cloned_stream, mio_token, Ready::readable(), PollOpt::edge())?;
+    let mut poll = Poll::new()?;
+    poll.registry().register(stream, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(1); //only interacting with one stream
 
     let mut bytes_read = 0;
@@ -124,7 +120,7 @@ fn receive_payload(
         for event in events.iter() {
             event.token();
             loop {
-                let size = match cloned_stream.read(&mut buffer[bytes_read..]) {
+                let size = match stream.read(&mut buffer[bytes_read..]) {
                     Ok(size) => size,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         // nothing left to process

@@ -64,15 +64,7 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
         Ok(s) => s,
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
     };
-    let stream = match TcpStream::from_stream(raw_stream) {
-        Ok(s) => s,
-        Err(e) => {
-            return Err(Box::new(simple_error::simple_error!(
-                "unable to prepare TCP control-channel: {}",
-                e
-            )))
-        }
-    };
+    let stream = TcpStream::from_std(raw_stream);
     log::info!("connected to server");
 
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");

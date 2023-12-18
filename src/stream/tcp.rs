@@ -79,13 +79,14 @@ impl TcpTestDefinition {
 pub mod receiver {
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+    use std::os::fd::FromRawFd;
     use std::os::unix::io::AsRawFd;
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
     use mio::net::{TcpListener, TcpStream};
-    use mio::{Events, Poll, PollOpt, Ready, Token};
+    use mio::{Events, Interest, Poll, Token};
 
     const POLL_TIMEOUT: Duration = Duration::from_millis(250);
     const RECEIVE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -129,7 +130,7 @@ pub mod receiver {
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
-                        return Ok(TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                        return Ok(TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
                             .expect("failed to bind OS-assigned IPv6 TCP socket"));
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
@@ -137,7 +138,7 @@ pub mod receiver {
                         for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
                             let listener_result =
-                                TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                                TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
@@ -148,7 +149,7 @@ pub mod receiver {
                         for port_idx in 0..=self.pos_ip6 {
                             //circle back to where the search started
                             let listener_result =
-                                TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                                TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
@@ -161,7 +162,7 @@ pub mod receiver {
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
-                        return Ok(TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                        return Ok(TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
                             .expect("failed to bind OS-assigned IPv4 TCP socket"));
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
@@ -169,7 +170,7 @@ pub mod receiver {
                         for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
                             let listener_result =
-                                TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                                TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
@@ -180,7 +181,7 @@ pub mod receiver {
                         for port_idx in 0..=self.pos_ip4 {
                             //circle back to where the search started
                             let listener_result =
-                                TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                                TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
@@ -241,8 +242,8 @@ pub mod receiver {
 
             let listener = self.listener.as_mut().unwrap();
             let mio_token = Token(0);
-            let poll = Poll::new()?;
-            poll.register(listener, mio_token, Ready::readable(), PollOpt::edge())?;
+            let mut poll = Poll::new()?;
+            poll.registry().register(listener, mio_token, Interest::READABLE)?;
             let mut events = Events::with_capacity(1);
 
             let start = Instant::now();
@@ -259,7 +260,7 @@ pub mod receiver {
                 for event in events.iter() {
                     event.token();
                     loop {
-                        let (stream, address) = match listener.accept() {
+                        let (mut stream, address) = match listener.accept() {
                             Ok((stream, address)) => (stream, address),
                             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                                 // nothing to do
@@ -272,10 +273,9 @@ pub mod receiver {
 
                         log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
 
-                        let mut verification_stream = stream.try_clone()?;
                         let mio_token2 = Token(0);
-                        let poll2 = Poll::new()?;
-                        poll2.register(&verification_stream, mio_token2, Ready::readable(), PollOpt::edge())?;
+                        let mut poll2 = Poll::new()?;
+                        poll2.registry().register(&mut stream, mio_token2, Interest::READABLE)?;
 
                         let mut buffer = [0_u8; 16];
                         let mut events2 = Events::with_capacity(1);
@@ -283,7 +283,7 @@ pub mod receiver {
                         for event2 in events2.iter() {
                             event2.token();
 
-                            if let Err(e) = verification_stream.read(&mut buffer) {
+                            if let Err(e) = stream.read(&mut buffer) {
                                 if e.kind() == std::io::ErrorKind::WouldBlock {
                                     // client didn't provide anything
                                     break;
@@ -297,12 +297,13 @@ pub mod receiver {
                                     // NOTE: features unsupported on Windows
                                     if self.receive_buffer != 0 {
                                         log::debug!("setting receive-buffer to {}...", self.receive_buffer);
-                                        super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
+                                        super::setsockopt(&stream, super::RcvBuf, &self.receive_buffer)?;
                                     }
                                 }
 
                                 self.mio_poll
-                                    .register(&stream, self.mio_poll_token, Ready::readable(), PollOpt::edge())?;
+                                    .registry()
+                                    .register(&mut stream, self.mio_poll_token, Interest::READABLE)?;
                                 return Ok(stream);
                             }
                         }
@@ -441,6 +442,7 @@ pub mod receiver {
 pub mod sender {
     use std::io::Write;
     use std::net::{IpAddr, SocketAddr};
+    use std::os::fd::FromRawFd;
     use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant};
 
@@ -521,16 +523,7 @@ pub mod sender {
                 }
             };
             raw_stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-            let stream = match TcpStream::from_stream(raw_stream) {
-                Ok(s) => s,
-                Err(e) => {
-                    return Err(Box::new(simple_error::simple_error!(
-                        "unable to prepare TCP stream {}: {}",
-                        self.stream_idx,
-                        e
-                    )))
-                }
-            };
+            let stream = TcpStream::from_std(raw_stream);
             log::debug!("connected TCP stream {} to {}", self.stream_idx, stream.peer_addr()?);
 
             if self.no_delay {
@@ -541,7 +534,7 @@ pub mod sender {
                 //NOTE: features unsupported on Windows
                 if self.send_buffer != 0 {
                     log::debug!("setting send-buffer to {}...", self.send_buffer);
-                    super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
+                    super::setsockopt(&stream, super::SndBuf, &self.send_buffer)?;
                 }
             }
             Ok(stream)
