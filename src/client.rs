@@ -30,7 +30,6 @@ use crate::{
 };
 use mio::net::TcpStream;
 use std::{
-    error::Error,
     net::{IpAddr, Shutdown, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -41,7 +40,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 /// when false, the system is shutting down
 static ALIVE: AtomicBool = AtomicBool::new(true);

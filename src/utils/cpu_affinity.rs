@@ -18,10 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-extern crate core_affinity;
-
-use std::error::Error;
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 pub struct CpuAffinityManager {
     enabled_cores: Vec<core_affinity::CoreId>,

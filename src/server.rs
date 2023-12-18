@@ -18,7 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::error::Error;
 use std::io;
 use std::net::{Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
@@ -36,7 +35,7 @@ use crate::protocol::messaging::{prepare_connect, prepare_connect_ready};
 use crate::protocol::results::ServerDoneResult;
 use crate::stream::{tcp, udp, TestStream};
 
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 

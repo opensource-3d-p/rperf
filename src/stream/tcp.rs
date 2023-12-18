@@ -24,8 +24,7 @@ use crate::protocol::results::{get_unix_timestamp, IntervalResult, TcpReceiveRes
 
 use super::{parse_port_spec, TestStream, INTERVAL};
 
-use std::error::Error;
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 pub const TEST_HEADER_SIZE: usize = 16;
 

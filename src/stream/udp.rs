@@ -18,15 +18,13 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::error::Error;
-
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
 use crate::protocol::results::{get_unix_timestamp, IntervalResult, UdpReceiveResult, UdpSendResult};
 
 use super::{parse_port_spec, TestStream, INTERVAL};
 
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 pub const TEST_HEADER_SIZE: u16 = 36;
 const UDP_HEADER_SIZE: u16 = 8;
