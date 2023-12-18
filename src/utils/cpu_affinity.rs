@@ -30,10 +30,7 @@ pub struct CpuAffinityManager {
 impl CpuAffinityManager {
     pub fn new(cores: &str) -> BoxResult<CpuAffinityManager> {
         let core_ids = core_affinity::get_core_ids().unwrap_or_default();
-        log::debug!(
-            "enumerated CPU cores: {:?}",
-            core_ids.iter().map(|c| c.id).collect::<Vec<usize>>()
-        );
+        log::debug!("enumerated CPU cores: {:?}", core_ids.iter().map(|c| c.id).collect::<Vec<usize>>());
 
         let mut enabled_cores = Vec::new();
         for cid in cores.split(',') {

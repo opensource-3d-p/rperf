@@ -83,12 +83,7 @@ fn prepare_configuration_tcp_upload(
 }
 
 /// prepares a message used to describe the download role of a TCP test
-fn prepare_configuration_tcp_download(
-    test_id: &[u8; 16],
-    streams: u8,
-    length: usize,
-    receive_buffer: u32,
-) -> serde_json::Value {
+fn prepare_configuration_tcp_download(test_id: &[u8; 16], streams: u8, length: usize, receive_buffer: u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
 
@@ -132,12 +127,7 @@ fn prepare_configuration_udp_upload(
 }
 
 /// prepares a message used to describe the download role of a UDP test
-fn prepare_configuration_udp_download(
-    test_id: &[u8; 16],
-    streams: u8,
-    length: u16,
-    receive_buffer: u32,
-) -> serde_json::Value {
+fn prepare_configuration_udp_download(test_id: &[u8; 16], streams: u8, length: u16, receive_buffer: u32) -> serde_json::Value {
     serde_json::json!({
         "kind": "configuration",
 
@@ -197,10 +187,7 @@ fn calculate_length_udp(length: u16) -> u16 {
 }
 
 /// prepares a message used to describe the upload role in a test
-pub fn prepare_upload_configuration(
-    args: &crate::args::Args,
-    test_id: &[u8; 16],
-) -> BoxResult<serde_json::Value> {
+pub fn prepare_upload_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams: u8 = args.parallel as u8;
     let mut seconds: f32 = args.time as f32;
     let mut send_interval: f32 = args.send_interval as f32;
@@ -254,20 +241,14 @@ pub fn prepare_upload_configuration(
                 }
                 Err(_) => {
                     //invalid input; fall back to 1mbps
-                    log::warn!(
-                        "invalid bandwidth: {}; setting value to 1mbps",
-                        args.bandwidth
-                    );
+                    log::warn!("invalid bandwidth: {}; setting value to 1mbps", args.bandwidth);
                     bandwidth = 125000;
                 }
             }
         }
         None => {
             //invalid input; fall back to 1mbps
-            log::warn!(
-                "invalid bandwidth: {}; setting value to 1mbps",
-                args.bandwidth
-            );
+            log::warn!("invalid bandwidth: {}; setting value to 1mbps", args.bandwidth);
             bandwidth = 125000;
         }
     }
@@ -288,7 +269,11 @@ pub fn prepare_upload_configuration(
             length = 1024;
         }
         if send_buffer != 0 && send_buffer < length {
-            log::warn!("requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", send_buffer, length * 2);
+            log::warn!(
+                "requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
+                send_buffer,
+                length * 2
+            );
             send_buffer = length * 2;
         }
         Ok(prepare_configuration_udp_upload(
@@ -306,7 +291,11 @@ pub fn prepare_upload_configuration(
             length = 32 * 1024;
         }
         if send_buffer != 0 && send_buffer < length {
-            log::warn!("requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", send_buffer, length * 2);
+            log::warn!(
+                "requested send-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
+                send_buffer,
+                length * 2
+            );
             send_buffer = length * 2;
         }
 
@@ -325,10 +314,7 @@ pub fn prepare_upload_configuration(
     }
 }
 /// prepares a message used to describe the download role in a test
-pub fn prepare_download_configuration(
-    args: &crate::args::Args,
-    test_id: &[u8; 16],
-) -> BoxResult<serde_json::Value> {
+pub fn prepare_download_configuration(args: &crate::args::Args, test_id: &[u8; 16]) -> BoxResult<serde_json::Value> {
     let parallel_streams: u8 = args.parallel as u8;
     let mut length: u32 = args.length as u32;
     let mut receive_buffer: u32 = args.receive_buffer as u32;
@@ -339,7 +325,11 @@ pub fn prepare_download_configuration(
             length = 1024;
         }
         if receive_buffer != 0 && receive_buffer < length {
-            log::warn!("requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", receive_buffer, length * 2);
+            log::warn!(
+                "requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
+                receive_buffer,
+                length * 2
+            );
             receive_buffer = length * 2;
         }
         Ok(prepare_configuration_udp_download(
@@ -354,7 +344,11 @@ pub fn prepare_download_configuration(
             length = 32 * 1024;
         }
         if receive_buffer != 0 && receive_buffer < length {
-            log::warn!("requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}", receive_buffer, length * 2);
+            log::warn!(
+                "requested receive-buffer, {}, is too small to hold the data to be exchanged; it will be increased to {}",
+                receive_buffer,
+                length * 2
+            );
             receive_buffer = length * 2;
         }
         Ok(prepare_configuration_tcp_download(

@@ -51,21 +51,12 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
 }
 
 /// receives the length-count of a pending message over a client-server communications stream
-fn receive_length(
-    stream: &mut TcpStream,
-    alive_check: fn() -> bool,
-    results_handler: &mut dyn FnMut() -> BoxResult<()>,
-) -> BoxResult<u16> {
+fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_handler: &mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
     let mut cloned_stream = stream.try_clone()?;
 
     let mio_token = Token(0);
     let poll = Poll::new()?;
-    poll.register(
-        &cloned_stream,
-        mio_token,
-        Ready::readable(),
-        PollOpt::edge(),
-    )?;
+    poll.register(&cloned_stream, mio_token, Ready::readable(), PollOpt::edge())?;
     let mut events = Events::with_capacity(1); //only interacting with one stream
 
     let mut length_bytes_read = 0;
@@ -93,20 +84,14 @@ fn receive_length(
                         return Err(Box::new(simple_error::simple_error!("connection lost")));
                     } else {
                         //shutting down; a disconnect is expected
-                        return Err(Box::new(simple_error::simple_error!(
-                            "local shutdown requested"
-                        )));
+                        return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
                     }
                 }
 
                 length_bytes_read += size;
                 if length_bytes_read == 2 {
                     let length = u16::from_be_bytes(length_spec);
-                    log::debug!(
-                        "received length-spec of {} from {}",
-                        length,
-                        stream.peer_addr()?
-                    );
+                    log::debug!("received length-spec of {} from {}", length, stream.peer_addr()?);
                     return Ok(length);
                 } else {
                     log::debug!("received partial length-spec from {}", stream.peer_addr()?);
@@ -114,9 +99,7 @@ fn receive_length(
             }
         }
     }
-    Err(Box::new(simple_error::simple_error!(
-        "system shutting down"
-    )))
+    Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
 /// receives the data-value of a pending message over a client-server communications stream
 fn receive_payload(
@@ -129,12 +112,7 @@ fn receive_payload(
 
     let mio_token = Token(0);
     let poll = Poll::new()?;
-    poll.register(
-        &cloned_stream,
-        mio_token,
-        Ready::readable(),
-        PollOpt::edge(),
-    )?;
+    poll.register(&cloned_stream, mio_token, Ready::readable(), PollOpt::edge())?;
     let mut events = Events::with_capacity(1); //only interacting with one stream
 
     let mut bytes_read = 0;
@@ -162,9 +140,7 @@ fn receive_payload(
                         return Err(Box::new(simple_error::simple_error!("connection lost")));
                     } else {
                         // shutting down; a disconnect is expected
-                        return Err(Box::new(simple_error::simple_error!(
-                            "local shutdown requested"
-                        )));
+                        return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
                     }
                 }
 
@@ -185,9 +161,7 @@ fn receive_payload(
             }
         }
     }
-    Err(Box::new(simple_error::simple_error!(
-        "system shutting down"
-    )))
+    Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
 /// handles the full process of retrieving a message from a client-server communications stream
 pub fn receive(

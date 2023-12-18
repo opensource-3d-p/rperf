@@ -22,14 +22,9 @@ use crate::{
     args,
     protocol::{
         communication::{receive, send, KEEPALIVE_DURATION},
-        messaging::{
-            prepare_begin, prepare_download_configuration, prepare_end,
-            prepare_upload_configuration,
-        },
-        results::ClientDoneResult,
-        results::{
-            IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults,
-        },
+        messaging::{prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration},
+        results::{ClientDoneResult, ClientFailedResult},
+        results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
     stream::{tcp, udp, TestStream},
 };
@@ -63,21 +58,12 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
 
     let server_addr = destination.to_socket_addrs()?.next();
     if server_addr.is_none() {
-        return Err(Box::new(simple_error::simple_error!(
-            "unable to resolve {}",
-            address
-        )));
+        return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
     }
-    let raw_stream =
-        match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
-            Ok(s) => s,
-            Err(e) => {
-                return Err(Box::new(simple_error::simple_error!(
-                    "unable to connect: {}",
-                    e
-                )))
-            }
-        };
+    let raw_stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
+        Ok(s) => s,
+        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
+    };
     let stream = match TcpStream::from_stream(raw_stream) {
         Ok(s) => s,
         Err(e) => {
@@ -89,12 +75,8 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
     };
     log::info!("connected to server");
 
-    stream
-        .set_nodelay(true)
-        .expect("cannot disable Nagle's algorithm");
-    stream
-        .set_keepalive(Some(KEEPALIVE_DURATION))
-        .expect("unable to set TCP keepalive");
+    stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
+    stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
 
     Ok(stream)
 }
@@ -121,18 +103,10 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut complete = false;
 
     //config-parsing and pre-connection setup
-    let mut tcp_port_pool = tcp::receiver::TcpPortPool::new(
-        args.tcp_port_pool.to_string(),
-        args.tcp6_port_pool.to_string(),
-    );
-    let mut udp_port_pool = udp::receiver::UdpPortPool::new(
-        args.udp_port_pool.to_string(),
-        args.udp6_port_pool.to_string(),
-    );
+    let mut tcp_port_pool = tcp::receiver::TcpPortPool::new(args.tcp_port_pool.to_string(), args.tcp6_port_pool.to_string());
+    let mut udp_port_pool = udp::receiver::UdpPortPool::new(args.udp_port_pool.to_string(), args.udp6_port_pool.to_string());
 
-    let cpu_affinity_manager = Arc::new(Mutex::new(
-        crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?,
-    ));
+    let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?));
 
     let display_json: bool;
     let display_bit: bool;
@@ -163,16 +137,14 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
     //scaffolding to track and relay the streams and stream-results associated with this test
     let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
-    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> =
-        Vec::with_capacity(stream_count);
+    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx): (
         std::sync::mpsc::Sender<IntervalResultBox>,
         std::sync::mpsc::Receiver<IntervalResultBox>,
     ) = channel();
 
-    let test_results: Mutex<Box<dyn TestResults>> =
-        prepare_test_results(is_udp, stream_count as u8);
+    let test_results: Mutex<Box<dyn TestResults>> = prepare_test_results(is_udp, stream_count as u8);
 
     //a closure used to pass results from stream-handlers to the test-result structure
     let mut results_handler = || -> BoxResult<()> {
@@ -193,10 +165,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                     } else {
                         log::warn!("stream {} failed", result.get_stream_idx());
                     }
-                    tr.mark_stream_done(
-                        &result.get_stream_idx(),
-                        result.kind() == IntervalResultKind::ClientDone,
-                    );
+                    tr.mark_stream_done(&result.get_stream_idx(), result.kind() == IntervalResultKind::ClientDone);
                     if tr.count_in_progress_streams() == 0 {
                         complete = true;
 
@@ -226,10 +195,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
         if is_udp {
             //UDP
-            log::info!(
-                "preparing for reverse-UDP test with {} streams...",
-                stream_count
-            );
+            log::info!("preparing for reverse-UDP test with {} streams...", stream_count);
 
             let test_definition = udp::UdpTestDefinition::new(&download_config)?;
             for stream_idx in 0..stream_count {
@@ -246,10 +212,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             }
         } else {
             //TCP
-            log::info!(
-                "preparing for reverse-TCP test with {} streams...",
-                stream_count
-            );
+            log::info!("preparing for reverse-TCP test with {} streams...", stream_count);
 
             let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
             for stream_idx in 0..stream_count {
@@ -410,11 +373,9 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                         },
                         Err(e) => {
                             log::error!("unable to process stream: {}", e);
-                            match c_results_tx.send(Box::new(
-                                crate::protocol::results::ClientFailedResult {
-                                    stream_idx: test.get_idx(),
-                                },
-                            )) {
+                            match c_results_tx.send(Box::new(ClientFailedResult {
+                                stream_idx: test.get_idx(),
+                            })) {
                                 Ok(_) => (),
                                 Err(e) => {
                                     log::error!("unable to report interval-failed-result: {}", e)
@@ -457,8 +418,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 "receive" | "send" => {
                     //receive/send-results from the server
                     if !display_json {
-                        let result =
-                            crate::protocol::results::interval_result_from_json(payload.clone())?;
+                        let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
                         println!("{}", result.to_string(display_bit));
                     }
                     let mut tr = test_results.lock().unwrap();
@@ -480,9 +440,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                                 _ => (), //not possible
                             }
                             tr.mark_stream_done_server(&(idx64 as u8));
-                            if tr.count_in_progress_streams() == 0
-                                && tr.count_in_progress_streams_server() == 0
-                            {
+                            if tr.count_in_progress_streams() == 0 && tr.count_in_progress_streams_server() == 0 {
                                 //all data gathered from both sides
                                 kill();
                             }
@@ -517,9 +475,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
         let mut stream = match (*ps).lock() {
             Ok(guard) => guard,
             Err(poisoned) => {
-                log::error!(
-                    "a stream-handler was poisoned; this indicates some sort of logic error"
-                );
+                log::error!("a stream-handler was poisoned; this indicates some sort of logic error");
                 poisoned.into_inner()
             }
         };
@@ -601,23 +557,14 @@ pub fn kill() -> bool {
 }
 fn start_kill_timer() {
     unsafe {
-        KILL_TIMER_RELATIVE_START_TIME = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs_f64();
+        KILL_TIMER_RELATIVE_START_TIME = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
     }
 }
 fn is_alive() -> bool {
     unsafe {
         if KILL_TIMER_RELATIVE_START_TIME != 0.0 {
             //initialised
-            if SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs_f64()
-                - KILL_TIMER_RELATIVE_START_TIME
-                >= KILL_TIMEOUT
-            {
+            if SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64() - KILL_TIMER_RELATIVE_START_TIME >= KILL_TIMEOUT {
                 return false;
             }
         }

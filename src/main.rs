@@ -39,9 +39,7 @@ fn main() {
         log::debug!("registering SIGINT handler...");
         ctrlc2::set_handler(move || {
             if server::kill() {
-                log::warn!(
-                    "shutdown requested; please allow a moment for any in-progress tests to stop"
-                );
+                log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
             } else {
                 log::warn!("forcing shutdown immediately");
                 std::process::exit(3);
@@ -60,9 +58,7 @@ fn main() {
         log::debug!("registering SIGINT handler...");
         ctrlc2::set_handler(move || {
             if client::kill() {
-                log::warn!(
-                    "shutdown requested; please allow a moment for any in-progress tests to stop"
-                );
+                log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
             } else {
                 log::warn!("forcing shutdown immediately");
                 std::process::exit(3);

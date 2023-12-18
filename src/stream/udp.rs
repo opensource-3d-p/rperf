@@ -25,9 +25,7 @@ use std::error::Error;
 
 use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
 
-use crate::protocol::results::{
-    get_unix_timestamp, IntervalResult, UdpReceiveResult, UdpSendResult,
-};
+use crate::protocol::results::{get_unix_timestamp, IntervalResult, UdpReceiveResult, UdpSendResult};
 
 use super::{parse_port_spec, TestStream, INTERVAL};
 
@@ -77,11 +75,7 @@ impl UdpTestDefinition {
 
         Ok(UdpTestDefinition {
             test_id: test_id_bytes,
-            bandwidth: details
-                .get("bandwidth")
-                .unwrap_or(&serde_json::json!(0.0))
-                .as_f64()
-                .unwrap() as u64,
+            bandwidth: details.get("bandwidth").unwrap_or(&serde_json::json!(0.0)).as_f64().unwrap() as u64,
             length,
         })
     }
@@ -141,97 +135,67 @@ pub mod receiver {
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
-                        return Ok(UdpSocket::bind(SocketAddr::new(
-                            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                            0,
-                        ))
-                        .expect("failed to bind OS-assigned IPv6 UDP socket"));
+                        return Ok(UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0))
+                            .expect("failed to bind OS-assigned IPv6 UDP socket"));
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
 
                         for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result = UdpSocket::bind(SocketAddr::new(
-                                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                                self.ports_ip6[port_idx],
-                            ));
+                            let listener_result =
+                                UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
                             } else {
-                                log::warn!(
-                                    "unable to bind IPv6 UDP port {}",
-                                    self.ports_ip6[port_idx]
-                                );
+                                log::warn!("unable to bind IPv6 UDP port {}", self.ports_ip6[port_idx]);
                             }
                         }
                         for port_idx in 0..=self.pos_ip6 {
                             //circle back to where the search started
-                            let listener_result = UdpSocket::bind(SocketAddr::new(
-                                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                                self.ports_ip6[port_idx],
-                            ));
+                            let listener_result =
+                                UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result);
                             } else {
-                                log::warn!(
-                                    "unable to bind IPv6 UDP port {}",
-                                    self.ports_ip6[port_idx]
-                                );
+                                log::warn!("unable to bind IPv6 UDP port {}", self.ports_ip6[port_idx]);
                             }
                         }
                     }
-                    Err(Box::new(simple_error::simple_error!(
-                        "unable to allocate IPv6 UDP port"
-                    )))
+                    Err(Box::new(simple_error::simple_error!("unable to allocate IPv6 UDP port")))
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
-                        return Ok(UdpSocket::bind(SocketAddr::new(
-                            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                            0,
-                        ))
-                        .expect("failed to bind OS-assigned IPv4 UDP socket"));
+                        return Ok(UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0))
+                            .expect("failed to bind OS-assigned IPv4 UDP socket"));
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
 
                         for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result = UdpSocket::bind(SocketAddr::new(
-                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                                self.ports_ip4[port_idx],
-                            ));
+                            let listener_result =
+                                UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
                             } else {
-                                log::warn!(
-                                    "unable to bind IPv4 UDP port {}",
-                                    self.ports_ip4[port_idx]
-                                );
+                                log::warn!("unable to bind IPv4 UDP port {}", self.ports_ip4[port_idx]);
                             }
                         }
                         for port_idx in 0..=self.pos_ip4 {
                             //circle back to where the search started
-                            let listener_result = UdpSocket::bind(SocketAddr::new(
-                                IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                                self.ports_ip4[port_idx],
-                            ));
+                            let listener_result =
+                                UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
                             if let Ok(listener_result) = listener_result {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result);
                             } else {
-                                log::warn!(
-                                    "unable to bind IPv4 UDP port {}",
-                                    self.ports_ip4[port_idx]
-                                );
+                                log::warn!("unable to bind IPv4 UDP port {}", self.ports_ip4[port_idx]);
                             }
                         }
                     }
-                    Err(Box::new(simple_error::simple_error!(
-                        "unable to allocate IPv4 UDP port"
-                    )))
+                    Err(Box::new(simple_error::simple_error!("unable to allocate IPv4 UDP port")))
                 }
             }
         }
@@ -277,11 +241,7 @@ pub mod receiver {
                     super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
                 }
             }
-            log::debug!(
-                "bound UDP receive socket for stream {}: {}",
-                stream_idx,
-                socket.local_addr()?
-            );
+            log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
             Ok(UdpReceiver {
                 active: true,
@@ -294,11 +254,7 @@ pub mod receiver {
             })
         }
 
-        fn process_packets_ordering(
-            &mut self,
-            packet_id: u64,
-            history: &mut UdpReceiverIntervalHistory,
-        ) -> bool {
+        fn process_packets_ordering(&mut self, packet_id: u64, history: &mut UdpReceiverIntervalHistory) -> bool {
             /* the algorithm from iperf3 provides a pretty decent approximation
              * for tracking lost and out-of-order packets efficiently, so it's
              * been minimally reimplemented here, with corrections.
@@ -338,39 +294,27 @@ pub mod receiver {
             false
         }
 
-        fn process_jitter(
-            &mut self,
-            timestamp: &NaiveDateTime,
-            history: &mut UdpReceiverIntervalHistory,
-        ) {
+        fn process_jitter(&mut self, timestamp: &NaiveDateTime, history: &mut UdpReceiverIntervalHistory) {
             /* this is a pretty straightforward implementation of RFC 1889, Appendix 8
              * it works on an assumption that the timestamp delta between sender and receiver
              * will remain effectively constant during the testing window
              */
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time before UNIX epoch");
-            let current_timestamp =
-                NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos())
-                    .unwrap();
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
+            let current_timestamp = NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos()).unwrap();
 
             let time_delta = current_timestamp - *timestamp;
 
             let time_delta_nanoseconds = match time_delta.num_nanoseconds() {
                 Some(ns) => ns,
                 None => {
-                    log::warn!(
-                        "sender and receiver clocks are too out-of-sync to calculate jitter"
-                    );
+                    log::warn!("sender and receiver clocks are too out-of-sync to calculate jitter");
                     return;
                 }
             };
 
             if history.unbroken_sequence > 1 {
                 //do jitter calculation
-                let delta_seconds =
-                    (time_delta_nanoseconds - history.previous_time_delta_nanoseconds).abs() as f32
-                        / 1_000_000_000.00;
+                let delta_seconds = (time_delta_nanoseconds - history.previous_time_delta_nanoseconds).abs() as f32 / 1_000_000_000.00;
 
                 if history.unbroken_sequence > 2 {
                     //normal jitter-calculation, per the RFC
@@ -386,11 +330,7 @@ pub mod receiver {
             history.previous_time_delta_nanoseconds = time_delta_nanoseconds;
         }
 
-        fn process_packet(
-            &mut self,
-            packet: &[u8],
-            history: &mut UdpReceiverIntervalHistory,
-        ) -> bool {
+        fn process_packet(&mut self, packet: &[u8], history: &mut UdpReceiverIntervalHistory) -> bool {
             //the first sixteen bytes are the test's ID
             if packet[0..16] != self.test_definition.test_id {
                 return false;
@@ -407,8 +347,7 @@ pub mod receiver {
                 let origin_seconds = i64::from_be_bytes(packet[24..32].try_into().unwrap());
                 //and the following four are the number of nanoseconds since the UNIX epoch
                 let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into().unwrap());
-                let source_timestamp =
-                    NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).unwrap();
+                let source_timestamp = NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).unwrap();
 
                 history.unbroken_sequence += 1;
                 self.process_jitter(&source_timestamp, history);
@@ -425,9 +364,7 @@ pub mod receiver {
         }
     }
     impl super::TestStream for UdpReceiver {
-        fn run_interval(
-            &mut self,
-        ) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let mut buf = vec![0_u8; self.test_definition.length.into()];
 
             let mut bytes_received: u64 = 0;
@@ -450,7 +387,10 @@ pub mod receiver {
 
             while self.active {
                 if start.elapsed() >= RECEIVE_TIMEOUT {
-                    return Some(Err(Box::new(simple_error::simple_error!("UDP reception for stream {} timed out, likely because the end-signal was lost", self.stream_idx))));
+                    return Some(Err(Box::new(simple_error::simple_error!(
+                        "UDP reception for stream {} timed out, likely because the end-signal was lost",
+                        self.stream_idx
+                    ))));
                 }
 
                 log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
@@ -514,11 +454,7 @@ pub mod receiver {
                             })));
                         }
                     } else {
-                        log::warn!(
-                            "received packet unrelated to UDP stream {} from {}",
-                            self.stream_idx,
-                            peer_addr
-                        );
+                        log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
                         continue;
                     }
                 }
@@ -601,14 +537,10 @@ pub mod sender {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
             let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
             let socket = match receiver_ip {
-                IpAddr::V6(_) => {
-                    UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))
-                        .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port))
-                }
-                IpAddr::V4(_) => {
-                    UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))
-                        .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port))
-                }
+                IpAddr::V6(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))
+                    .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port)),
+                IpAddr::V4(_) => UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))
+                    .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port)),
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
             if !cfg!(windows) {
@@ -619,11 +551,7 @@ pub mod sender {
                 }
             }
             socket.connect(socket_addr_receiver)?;
-            log::debug!(
-                "connected UDP stream {} to {}",
-                stream_idx,
-                socket_addr_receiver
-            );
+            log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
 
             let mut staged_packet = vec![0_u8; test_definition.length.into()];
             for i in super::TEST_HEADER_SIZE..(staged_packet.len() as u16) {
@@ -649,9 +577,7 @@ pub mod sender {
         }
 
         fn prepare_packet(&mut self) {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system time before UNIX epoch");
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("system time before UNIX epoch");
 
             //eight bytes after the test ID are the packet's ID, in big-endian order
             self.staged_packet[16..24].copy_from_slice(&self.next_packet_id.to_be_bytes());
@@ -662,16 +588,12 @@ pub mod sender {
         }
     }
     impl super::TestStream for UdpSender {
-        fn run_interval(
-            &mut self,
-        ) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
-            let bytes_to_send =
-                ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
+            let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
             let mut bytes_to_send_remaining = bytes_to_send;
-            let bytes_to_send_per_interval_slice =
-                ((bytes_to_send as f32) * self.send_interval) as i64;
+            let bytes_to_send_per_interval_slice = ((bytes_to_send as f32) * self.send_interval) as i64;
             let mut bytes_to_send_per_interval_slice_remaining = bytes_to_send_per_interval_slice;
 
             let mut packets_sent: u64 = 0;
@@ -681,21 +603,13 @@ pub mod sender {
             let cycle_start = Instant::now();
 
             while self.active && self.remaining_duration > 0.0 && bytes_to_send_remaining > 0 {
-                log::trace!(
-                    "writing {} bytes in UDP stream {}...",
-                    self.staged_packet.len(),
-                    self.stream_idx
-                );
+                log::trace!("writing {} bytes in UDP stream {}...", self.staged_packet.len(), self.stream_idx);
                 let packet_start = Instant::now();
 
                 self.prepare_packet();
                 match self.socket.send(&self.staged_packet) {
                     Ok(packet_size) => {
-                        log::trace!(
-                            "wrote {} bytes in UDP stream {}",
-                            packet_size,
-                            self.stream_idx
-                        );
+                        log::trace!("wrote {} bytes in UDP stream {}", packet_size, self.stream_idx);
 
                         packets_sent += 1;
                         //reflect that a packet is in-flight
@@ -771,11 +685,7 @@ pub mod sender {
                     //do it a few times in case of loss
                     match self.socket.send(&self.staged_packet[0..16]) {
                         Ok(packet_size) => {
-                            log::trace!(
-                                "wrote {} bytes of test-end signal in UDP stream {}",
-                                packet_size,
-                                self.stream_idx
-                            );
+                            log::trace!("wrote {} bytes of test-end signal in UDP stream {}", packet_size, self.stream_idx);
                             remaining_announcements -= 1;
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

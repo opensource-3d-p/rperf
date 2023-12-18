@@ -50,13 +50,7 @@ pub struct Args {
     pub reverse: bool,
 
     /// the format in which to deplay information (json, megabit/sec, megabyte/sec)
-    #[arg(
-        short,
-        long,
-        value_enum,
-        value_name = "format",
-        default_value = "megabit"
-    )]
+    #[arg(short, long, value_enum, value_name = "format", default_value = "megabit")]
     pub format: Format,
 
     /// use UDP rather than TCP

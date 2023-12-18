@@ -86,7 +86,7 @@ impl IntervalResult for ClientDoneResult {
     fn to_string(&self, _bit: bool) -> String {
         format!(
             "----------\n\
-                 End of stream from client | stream: {}",
+            End of stream from client | stream: {}",
             self.stream_idx,
         )
     }
@@ -114,7 +114,7 @@ impl IntervalResult for ServerDoneResult {
     fn to_string(&self, _bit: bool) -> String {
         format!(
             "----------\n\
-                 End of stream from server | stream: {}",
+            End of stream from server | stream: {}",
             self.stream_idx,
         )
     }
@@ -143,7 +143,7 @@ impl IntervalResult for ClientFailedResult {
     fn to_string(&self, _bit: bool) -> String {
         format!(
             "----------\n\
-                 Failure in client stream | stream: {}",
+            Failure in client stream | stream: {}",
             self.stream_idx,
         )
     }
@@ -171,7 +171,7 @@ impl IntervalResult for ServerFailedResult {
     fn to_string(&self, _bit: bool) -> String {
         format!(
             "----------\n\
-                 Failure in server stream | stream: {}",
+            Failure in server stream | stream: {}",
             self.stream_idx,
         )
     }
@@ -226,17 +226,14 @@ impl IntervalResult for TcpReceiveResult {
         let bytes_per_second = self.bytes_received as f32 / duration_divisor;
 
         let throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                bytes_per_second / (1_000_000.00 / 8.0)
-            ),
+            true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
 
         format!(
             "----------\n\
-                 TCP receive result over {:.2}s | stream: {}\n\
-                 bytes: {} | per second: {:.3} | {}",
+            TCP receive result over {:.2}s | stream: {}\n\
+            bytes: {} | per second: {:.3} | {}",
             self.duration, self.stream_idx, self.bytes_received, bytes_per_second, throughput,
         )
     }
@@ -298,24 +295,18 @@ impl IntervalResult for TcpSendResult {
         let bytes_per_second = self.bytes_sent as f32 / duration_divisor;
 
         let throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                bytes_per_second / (1_000_000.00 / 8.0)
-            ),
+            true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
 
         let mut output = format!(
             "----------\n\
-                 TCP send result over {:.2}s | stream: {}\n\
-                 bytes: {} | per second: {:.3} | {}",
+            TCP send result over {:.2}s | stream: {}\n\
+            bytes: {} | per second: {:.3} | {}",
             self.duration, self.stream_idx, self.bytes_sent, bytes_per_second, throughput,
         );
         if self.sends_blocked > 0 {
-            output.push_str(&format!(
-                "\nstalls due to full send-buffer: {}",
-                self.sends_blocked
-            ));
+            output.push_str(&format!("\nstalls due to full send-buffer: {}", self.sends_blocked));
         }
         output
     }
@@ -377,20 +368,25 @@ impl IntervalResult for UdpReceiveResult {
         let bytes_per_second = self.bytes_received as f32 / duration_divisor;
 
         let throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                bytes_per_second / (1_000_000.00 / 8.0)
-            ),
+            true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
 
-        let mut output = format!("----------\n\
-                                  UDP receive result over {:.2}s | stream: {}\n\
-                                  bytes: {} | per second: {:.3} | {}\n\
-                                  packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
-                                self.duration, self.stream_idx,
-                                self.bytes_received, bytes_per_second, throughput,
-                                self.packets_received, self.packets_lost, self.packets_out_of_order, self.packets_duplicated, self.packets_received as f32 / duration_divisor,
+        let mut output = format!(
+            "----------\n\
+            UDP receive result over {:.2}s | stream: {}\n\
+            bytes: {} | per second: {:.3} | {}\n\
+            packets: {} | lost: {} | out-of-order: {} | duplicate: {} | per second: {:.3}",
+            self.duration,
+            self.stream_idx,
+            self.bytes_received,
+            bytes_per_second,
+            throughput,
+            self.packets_received,
+            self.packets_lost,
+            self.packets_out_of_order,
+            self.packets_duplicated,
+            self.packets_received as f32 / duration_divisor,
         );
         if self.jitter_seconds.is_some() {
             output.push_str(&format!(
@@ -460,18 +456,15 @@ impl IntervalResult for UdpSendResult {
         let bytes_per_second = self.bytes_sent as f32 / duration_divisor;
 
         let throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                bytes_per_second / (1_000_000.00 / 8.0)
-            ),
+            true => format!("megabits/second: {:.3}", bytes_per_second / (1_000_000.00 / 8.0)),
             false => format!("megabytes/second: {:.3}", bytes_per_second / 1_000_000.00),
         };
 
         let mut output = format!(
             "----------\n\
-                 UDP send result over {:.2}s | stream: {}\n\
-                 bytes: {} | per second: {:.3} | {}\n\
-                 packets: {} per second: {:.3}",
+            UDP send result over {:.2}s | stream: {}\n\
+            bytes: {} | per second: {:.3} | {}\n\
+            packets: {} per second: {:.3}",
             self.duration,
             self.stream_idx,
             self.bytes_sent,
@@ -481,10 +474,7 @@ impl IntervalResult for UdpSendResult {
             self.packets_sent as f32 / duration_divisor,
         );
         if self.sends_blocked > 0 {
-            output.push_str(&format!(
-                "\nstalls due to full send-buffer: {}",
-                self.sends_blocked
-            ));
+            output.push_str(&format!("\nstalls due to full send-buffer: {}", self.sends_blocked));
         }
         output
     }
@@ -499,49 +489,31 @@ pub fn interval_result_from_json(value: serde_json::Value) -> BoxResult<Box<dyn 
                         Some(kind) => match kind {
                             "receive" => Ok(Box::new(TcpReceiveResult::from_json(value)?)),
                             "send" => Ok(Box::new(TcpSendResult::from_json(value)?)),
-                            _ => Err(Box::new(simple_error::simple_error!(
-                                "unsupported interval-result kind: {}",
-                                kind
-                            ))),
+                            _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind: {}", kind))),
                         },
-                        None => Err(Box::new(simple_error::simple_error!(
-                            "interval-result's kind is not a string"
-                        ))),
+                        None => Err(Box::new(simple_error::simple_error!("interval-result's kind is not a string"))),
                     },
-                    None => Err(Box::new(simple_error::simple_error!(
-                        "interval-result has no kind"
-                    ))),
+                    None => Err(Box::new(simple_error::simple_error!("interval-result has no kind"))),
                 },
                 "udp" => match value.get("kind") {
                     Some(k) => match k.as_str() {
                         Some(kind) => match kind {
                             "receive" => Ok(Box::new(UdpReceiveResult::from_json(value)?)),
                             "send" => Ok(Box::new(UdpSendResult::from_json(value)?)),
-                            _ => Err(Box::new(simple_error::simple_error!(
-                                "unsupported interval-result kind: {}",
-                                kind
-                            ))),
+                            _ => Err(Box::new(simple_error::simple_error!("unsupported interval-result kind: {}", kind))),
                         },
-                        None => Err(Box::new(simple_error::simple_error!(
-                            "interval-result's kind is not a string"
-                        ))),
+                        None => Err(Box::new(simple_error::simple_error!("interval-result's kind is not a string"))),
                     },
-                    None => Err(Box::new(simple_error::simple_error!(
-                        "interval-result has no kind"
-                    ))),
+                    None => Err(Box::new(simple_error::simple_error!("interval-result has no kind"))),
                 },
                 _ => Err(Box::new(simple_error::simple_error!(
                     "unsupported interval-result family: {}",
                     family
                 ))),
             },
-            None => Err(Box::new(simple_error::simple_error!(
-                "interval-result's family is not a string"
-            ))),
+            None => Err(Box::new(simple_error::simple_error!("interval-result's family is not a string"))),
         },
-        None => Err(Box::new(simple_error::simple_error!(
-            "interval-result has no family"
-        ))),
+        None => Err(Box::new(simple_error::simple_error!("interval-result has no family"))),
     }
 }
 
@@ -565,8 +537,7 @@ impl StreamResults for TcpStreamResults {
                         Ok(())
                     }
                     "receive" => {
-                        self.receive_results
-                            .push(TcpReceiveResult::from_json(value)?);
+                        self.receive_results.push(TcpReceiveResult::from_json(value)?);
                         Ok(())
                     }
                     _ => Err(Box::new(simple_error::simple_error!(
@@ -574,13 +545,9 @@ impl StreamResults for TcpStreamResults {
                         kind
                     ))),
                 },
-                None => Err(Box::new(simple_error::simple_error!(
-                    "kind must be a string for TCP stream-result"
-                ))),
+                None => Err(Box::new(simple_error::simple_error!("kind must be a string for TCP stream-result"))),
             },
-            None => Err(Box::new(simple_error::simple_error!(
-                "no kind specified for TCP stream-result"
-            ))),
+            None => Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result"))),
         }
     }
 
@@ -639,8 +606,7 @@ impl StreamResults for UdpStreamResults {
                         Ok(())
                     }
                     "receive" => {
-                        self.receive_results
-                            .push(UdpReceiveResult::from_json(value)?);
+                        self.receive_results.push(UdpReceiveResult::from_json(value)?);
                         Ok(())
                     }
                     _ => Err(Box::new(simple_error::simple_error!(
@@ -648,13 +614,9 @@ impl StreamResults for UdpStreamResults {
                         kind
                     ))),
                 },
-                None => Err(Box::new(simple_error::simple_error!(
-                    "kind must be a string for UDP stream-result"
-                ))),
+                None => Err(Box::new(simple_error::simple_error!("kind must be a string for UDP stream-result"))),
             },
-            None => Err(Box::new(simple_error::simple_error!(
-                "no kind specified for UDP stream-result"
-            ))),
+            None => Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result"))),
         }
     }
 
@@ -699,8 +661,7 @@ impl StreamResults for UdpStreamResults {
             packets_duplicated += rr.packets_duplicated;
 
             if rr.jitter_seconds.is_some() {
-                jitter_weight +=
-                    (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
                 unbroken_sequence_count += rr.unbroken_sequence;
 
                 jitter_calculated = true;
@@ -712,7 +673,6 @@ impl StreamResults for UdpStreamResults {
 
             "bytes_sent": bytes_sent,
             "packets_sent": packets_sent,
-
 
             "duration_receive": duration_receive,
 
@@ -726,8 +686,7 @@ impl StreamResults for UdpStreamResults {
             summary["framed_packet_size"] = serde_json::json!(bytes_sent / packets_sent);
         }
         if jitter_calculated {
-            summary["jitter_average"] =
-                serde_json::json!(jitter_weight / (unbroken_sequence_count as f64));
+            summary["jitter_average"] = serde_json::json!(jitter_weight / (unbroken_sequence_count as f64));
             summary["jitter_packets_consecutive"] = serde_json::json!(unbroken_sequence_count);
         }
 
@@ -768,14 +727,7 @@ pub trait TestResults {
         common_config: serde_json::Value,
         additional_config: serde_json::Value,
     ) -> String {
-        serde_json::to_string_pretty(&self.to_json(
-            omit_seconds,
-            upload_config,
-            download_config,
-            common_config,
-            additional_config,
-        ))
-        .unwrap()
+        serde_json::to_string_pretty(&self.to_json(omit_seconds, upload_config, download_config, common_config, additional_config)).unwrap()
     }
 
     //produces test-results in tabular form
@@ -849,26 +801,18 @@ impl TestResults for TcpTestResults {
                                     idx64
                                 ))),
                             },
-                            None => Err(Box::new(simple_error::simple_error!(
-                                "stream-index is not an integer"
-                            ))),
+                            None => Err(Box::new(simple_error::simple_error!("stream-index is not an integer"))),
                         },
-                        None => Err(Box::new(simple_error::simple_error!(
-                            "no stream-index specified"
-                        ))),
+                        None => Err(Box::new(simple_error::simple_error!("no stream-index specified"))),
                     },
                     _ => Err(Box::new(simple_error::simple_error!(
                         "unsupported family for TCP stream-result: {}",
                         family
                     ))),
                 },
-                None => Err(Box::new(simple_error::simple_error!(
-                    "kind must be a string for TCP stream-result"
-                ))),
+                None => Err(Box::new(simple_error::simple_error!("kind must be a string for TCP stream-result"))),
             },
-            None => Err(Box::new(simple_error::simple_error!(
-                "no kind specified for TCP stream-result"
-            ))),
+            None => Err(Box::new(simple_error::simple_error!("no kind specified for TCP stream-result"))),
         }
     }
 
@@ -983,14 +927,8 @@ impl TestResults for TcpTestResults {
         };
         let send_bytes_per_second = bytes_sent as f64 / send_duration_divisor;
         let send_throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                send_bytes_per_second / (1_000_000.00 / 8.0)
-            ),
-            false => format!(
-                "megabytes/second: {:.3}",
-                send_bytes_per_second / 1_000_000.00
-            ),
+            true => format!("megabits/second: {:.3}", send_bytes_per_second / (1_000_000.00 / 8.0)),
+            false => format!("megabytes/second: {:.3}", send_bytes_per_second / 1_000_000.00),
         };
         let total_send_throughput = match bit {
             true => format!(
@@ -1011,14 +949,8 @@ impl TestResults for TcpTestResults {
         };
         let receive_bytes_per_second = bytes_received as f64 / receive_duration_divisor;
         let receive_throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                receive_bytes_per_second / (1_000_000.00 / 8.0)
-            ),
-            false => format!(
-                "megabytes/second: {:.3}",
-                receive_bytes_per_second / 1_000_000.00
-            ),
+            true => format!("megabits/second: {:.3}", receive_bytes_per_second / (1_000_000.00 / 8.0)),
+            false => format!("megabytes/second: {:.3}", receive_bytes_per_second / 1_000_000.00),
         };
         let total_receive_throughput = match bit {
             true => format!(
@@ -1033,13 +965,13 @@ impl TestResults for TcpTestResults {
 
         let mut output = format!(
             "==========\n\
-                                  TCP send result over {:.2}s | streams: {}\n\
-                                  stream-average bytes per second: {:.3} | {}\n\
-                                  total bytes: {} | per second: {:.3} | {}\n\
-                                  ==========\n\
-                                  TCP receive result over {:.2}s | streams: {}\n\
-                                  stream-average bytes per second: {:.3} | {}\n\
-                                  total bytes: {} | per second: {:.3} | {}",
+            TCP send result over {:.2}s | streams: {}\n\
+            stream-average bytes per second: {:.3} | {}\n\
+            total bytes: {} | per second: {:.3} | {}\n\
+            ==========\n\
+            TCP receive result over {:.2}s | streams: {}\n\
+            stream-average bytes per second: {:.3} | {}\n\
+            total bytes: {} | per second: {:.3} | {}",
             stream_send_durations[stream_send_durations.len() - 1],
             stream_count,
             send_bytes_per_second,
@@ -1133,26 +1065,18 @@ impl TestResults for UdpTestResults {
                                     idx64
                                 ))),
                             },
-                            None => Err(Box::new(simple_error::simple_error!(
-                                "stream-index is not an integer"
-                            ))),
+                            None => Err(Box::new(simple_error::simple_error!("stream-index is not an integer"))),
                         },
-                        None => Err(Box::new(simple_error::simple_error!(
-                            "no stream-index specified"
-                        ))),
+                        None => Err(Box::new(simple_error::simple_error!("no stream-index specified"))),
                     },
                     _ => Err(Box::new(simple_error::simple_error!(
                         "unsupported family for UDP stream-result: {}",
                         family
                     ))),
                 },
-                None => Err(Box::new(simple_error::simple_error!(
-                    "kind must be a string for UDP stream-result"
-                ))),
+                None => Err(Box::new(simple_error::simple_error!("kind must be a string for UDP stream-result"))),
             },
-            None => Err(Box::new(simple_error::simple_error!(
-                "no kind specified for UDP stream-result"
-            ))),
+            None => Err(Box::new(simple_error::simple_error!("no kind specified for UDP stream-result"))),
         }
     }
 
@@ -1212,8 +1136,7 @@ impl TestResults for UdpTestResults {
                 packets_duplicated += rr.packets_duplicated;
 
                 if rr.jitter_seconds.is_some() {
-                    jitter_weight +=
-                        (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
                     unbroken_sequence_count += rr.unbroken_sequence;
 
                     jitter_calculated = true;
@@ -1227,7 +1150,6 @@ impl TestResults for UdpTestResults {
             "bytes_sent": bytes_sent,
             "packets_sent": packets_sent,
 
-
             "duration_receive": duration_receive,
 
             "bytes_received": bytes_received,
@@ -1240,8 +1162,7 @@ impl TestResults for UdpTestResults {
             summary["framed_packet_size"] = serde_json::json!(bytes_sent / packets_sent);
         }
         if jitter_calculated {
-            summary["jitter_average"] =
-                serde_json::json!(jitter_weight / (unbroken_sequence_count as f64));
+            summary["jitter_average"] = serde_json::json!(jitter_weight / (unbroken_sequence_count as f64));
             summary["jitter_packets_consecutive"] = serde_json::json!(unbroken_sequence_count);
         }
 
@@ -1310,8 +1231,7 @@ impl TestResults for UdpTestResults {
                 packets_duplicated += rr.packets_duplicated;
 
                 if rr.jitter_seconds.is_some() {
-                    jitter_weight +=
-                        (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                    jitter_weight += (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
                     unbroken_sequence_count += rr.unbroken_sequence;
 
                     jitter_calculated = true;
@@ -1329,14 +1249,8 @@ impl TestResults for UdpTestResults {
         };
         let send_bytes_per_second = bytes_sent as f64 / send_duration_divisor;
         let send_throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                send_bytes_per_second / (1_000_000.00 / 8.0)
-            ),
-            false => format!(
-                "megabytes/second: {:.3}",
-                send_bytes_per_second / 1_000_000.00
-            ),
+            true => format!("megabits/second: {:.3}", send_bytes_per_second / (1_000_000.00 / 8.0)),
+            false => format!("megabytes/second: {:.3}", send_bytes_per_second / 1_000_000.00),
         };
         let total_send_throughput = match bit {
             true => format!(
@@ -1357,14 +1271,8 @@ impl TestResults for UdpTestResults {
         };
         let receive_bytes_per_second = bytes_received as f64 / receive_duration_divisor;
         let receive_throughput = match bit {
-            true => format!(
-                "megabits/second: {:.3}",
-                receive_bytes_per_second / (1_000_000.00 / 8.0)
-            ),
-            false => format!(
-                "megabytes/second: {:.3}",
-                receive_bytes_per_second / 1_000_000.00
-            ),
+            true => format!("megabits/second: {:.3}", receive_bytes_per_second / (1_000_000.00 / 8.0)),
+            false => format!("megabytes/second: {:.3}", receive_bytes_per_second / 1_000_000.00),
         };
         let total_receive_throughput = match bit {
             true => format!(
@@ -1384,24 +1292,39 @@ impl TestResults for UdpTestResults {
         } else {
             packets_sent as f64
         };
-        let mut output = format!("==========\n\
-                                  UDP send result over {:.2}s | streams: {}\n\
-                                  stream-average bytes per second: {:.3} | {}\n\
-                                  total bytes: {} | per second: {:.3} | {}\n\
-                                  packets: {} per second: {:.3}\n\
-                                  ==========\n\
-                                  UDP receive result over {:.2}s | streams: {}\n\
-                                  stream-average bytes per second: {:.3} | {}\n\
-                                  total bytes: {} | per second: {:.3} | {}\n\
-                                  packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
-                                stream_send_durations[stream_send_durations.len() - 1], stream_count,
-                                send_bytes_per_second, send_throughput,
-                                bytes_sent, send_bytes_per_second * stream_count as f64, total_send_throughput,
-                                packets_sent, (packets_sent as f64 / send_duration_divisor) * stream_count as f64,
-                                stream_receive_durations[stream_receive_durations.len() - 1], stream_count,
-                                receive_bytes_per_second, receive_throughput,
-                                bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
-                                packets_received, packets_lost, (packets_lost as f64 / packets_sent_divisor) * 100.0, packets_out_of_order, packets_duplicated, (packets_received as f64 / receive_duration_divisor) * stream_count as f64,
+        let mut output = format!(
+            "==========\n\
+            UDP send result over {:.2}s | streams: {}\n\
+            stream-average bytes per second: {:.3} | {}\n\
+            total bytes: {} | per second: {:.3} | {}\n\
+            packets: {} per second: {:.3}\n\
+            ==========\n\
+            UDP receive result over {:.2}s | streams: {}\n\
+            stream-average bytes per second: {:.3} | {}\n\
+            total bytes: {} | per second: {:.3} | {}\n\
+            packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
+            stream_send_durations[stream_send_durations.len() - 1],
+            stream_count,
+            send_bytes_per_second,
+            send_throughput,
+            bytes_sent,
+            send_bytes_per_second * stream_count as f64,
+            total_send_throughput,
+            packets_sent,
+            (packets_sent as f64 / send_duration_divisor) * stream_count as f64,
+            stream_receive_durations[stream_receive_durations.len() - 1],
+            stream_count,
+            receive_bytes_per_second,
+            receive_throughput,
+            bytes_received,
+            receive_bytes_per_second * stream_count as f64,
+            total_receive_throughput,
+            packets_received,
+            packets_lost,
+            (packets_lost as f64 / packets_sent_divisor) * 100.0,
+            packets_out_of_order,
+            packets_duplicated,
+            (packets_received as f64 / receive_duration_divisor) * stream_count as f64,
         );
         if jitter_calculated {
             output.push_str(&format!(
