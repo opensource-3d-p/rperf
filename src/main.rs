@@ -18,12 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod args;
-mod client;
-mod protocol;
-mod server;
-mod stream;
-mod utils;
+use rperf::{args, client, server};
 
 fn main() {
     use clap::Parser;
@@ -37,7 +32,7 @@ fn main() {
 
     if args.server {
         log::debug!("registering SIGINT handler...");
-        ctrlc2::set_handler(move || {
+        let exiting = ctrlc2::set_handler(move || {
             if server::kill() {
                 log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
             } else {
@@ -50,6 +45,7 @@ fn main() {
 
         log::debug!("beginning normal operation...");
         let service = server::serve(&args);
+        exiting.join().expect("unable to join SIGINT handler thread");
         if service.is_err() {
             log::error!("unable to run server: {}", service.unwrap_err());
             std::process::exit(4);

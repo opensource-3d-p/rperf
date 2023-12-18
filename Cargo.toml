@@ -14,7 +14,7 @@ readme = "README.md"
 chrono = "0.4"
 clap = { version = "4.4", features = ["derive", "wrap_help"] }
 core_affinity = "0.8"
-ctrlc2 = "3.5"
+ctrlc2 = { version = "3.5", features = ["termination"] }
 env_logger = "0.10"
 log = { version = "0.4", features = ["std"] }
 mio = { version = "0.8", features = ["log", "os-poll", "net"] }

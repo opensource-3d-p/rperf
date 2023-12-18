@@ -34,8 +34,7 @@ use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 use crate::protocol::messaging::{prepare_connect, prepare_connect_ready};
 use crate::protocol::results::ServerDoneResult;
 use crate::stream::{tcp, udp, TestStream};
-
-type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+use crate::BoxResult;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -335,7 +334,14 @@ pub fn serve(args: &Args) -> BoxResult<()> {
     let mut events = Events::with_capacity(32);
 
     while is_alive() {
-        poll.poll(&mut events, Some(POLL_TIMEOUT))?;
+        if let Err(err) = poll.poll(&mut events, Some(POLL_TIMEOUT)) {
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                log::debug!("Poll interrupted: \"{err}\", ignored, continue polling");
+                continue;
+            }
+            log::error!("Poll error: {}", err);
+            break;
+        }
         for event in events.iter() {
             event.token();
             loop {

@@ -27,6 +27,7 @@ use crate::{
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
     },
     stream::{tcp, udp, TestStream},
+    BoxResult,
 };
 use mio::net::TcpStream;
 use std::{
@@ -39,8 +40,6 @@ use std::{
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
 
 /// when false, the system is shutting down
 static ALIVE: AtomicBool = AtomicBool::new(true);

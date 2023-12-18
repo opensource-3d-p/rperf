@@ -21,7 +21,7 @@
 pub mod tcp;
 pub mod udp;
 
-type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+use crate::BoxResult;
 
 pub const INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 

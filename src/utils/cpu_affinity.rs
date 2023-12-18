@@ -18,7 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-type BoxResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+use crate::BoxResult;
 
 pub struct CpuAffinityManager {
     enabled_cores: Vec<core_affinity::CoreId>,
