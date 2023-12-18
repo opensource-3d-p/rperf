@@ -77,37 +77,8 @@ fn receive_length(
         for event in events.iter() {
             event.token();
             loop {
-                match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
-                    Ok(size) => {
-                        if size == 0 {
-                            if alive_check() {
-                                return Err(Box::new(simple_error::simple_error!(
-                                    "connection lost"
-                                )));
-                            } else {
-                                //shutting down; a disconnect is expected
-                                return Err(Box::new(simple_error::simple_error!(
-                                    "local shutdown requested"
-                                )));
-                            }
-                        }
-
-                        length_bytes_read += size;
-                        if length_bytes_read == 2 {
-                            let length = u16::from_be_bytes(length_spec);
-                            log::debug!(
-                                "received length-spec of {} from {}",
-                                length,
-                                stream.peer_addr()?
-                            );
-                            return Ok(length);
-                        } else {
-                            log::debug!(
-                                "received partial length-spec from {}",
-                                stream.peer_addr()?
-                            );
-                        }
-                    }
+                let size = match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
+                    Ok(size) => size,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         //nothing left to process
                         break;
@@ -115,6 +86,30 @@ fn receive_length(
                     Err(e) => {
                         return Err(Box::new(e));
                     }
+                };
+
+                if size == 0 {
+                    if alive_check() {
+                        return Err(Box::new(simple_error::simple_error!("connection lost")));
+                    } else {
+                        //shutting down; a disconnect is expected
+                        return Err(Box::new(simple_error::simple_error!(
+                            "local shutdown requested"
+                        )));
+                    }
+                }
+
+                length_bytes_read += size;
+                if length_bytes_read == 2 {
+                    let length = u16::from_be_bytes(length_spec);
+                    log::debug!(
+                        "received length-spec of {} from {}",
+                        length,
+                        stream.peer_addr()?
+                    );
+                    return Ok(length);
+                } else {
+                    log::debug!("received partial length-spec from {}", stream.peer_addr()?);
                 }
             }
         }
@@ -151,43 +146,41 @@ fn receive_payload(
         for event in events.iter() {
             event.token();
             loop {
-                match cloned_stream.read(&mut buffer[bytes_read..]) {
-                    Ok(size) => {
-                        if size == 0 {
-                            if alive_check() {
-                                return Err(Box::new(simple_error::simple_error!(
-                                    "connection lost"
-                                )));
-                            } else {
-                                //shutting down; a disconnect is expected
-                                return Err(Box::new(simple_error::simple_error!(
-                                    "local shutdown requested"
-                                )));
-                            }
-                        }
-
-                        bytes_read += size;
-                        if bytes_read == length as usize {
-                            match serde_json::from_slice(&buffer) {
-                                Ok(v) => {
-                                    log::debug!("received {:?} from {}", v, stream.peer_addr()?);
-                                    return Ok(v);
-                                }
-                                Err(e) => {
-                                    return Err(Box::new(e));
-                                }
-                            }
-                        } else {
-                            log::debug!("received partial payload from {}", stream.peer_addr()?);
-                        }
-                    }
+                let size = match cloned_stream.read(&mut buffer[bytes_read..]) {
+                    Ok(size) => size,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        //nothing left to process
+                        // nothing left to process
                         break;
                     }
                     Err(e) => {
                         return Err(Box::new(e));
                     }
+                };
+
+                if size == 0 {
+                    if alive_check() {
+                        return Err(Box::new(simple_error::simple_error!("connection lost")));
+                    } else {
+                        // shutting down; a disconnect is expected
+                        return Err(Box::new(simple_error::simple_error!(
+                            "local shutdown requested"
+                        )));
+                    }
+                }
+
+                bytes_read += size;
+                if bytes_read == length as usize {
+                    match serde_json::from_slice(&buffer) {
+                        Ok(v) => {
+                            log::debug!("received {:?} from {}", v, stream.peer_addr()?);
+                            return Ok(v);
+                        }
+                        Err(e) => {
+                            return Err(Box::new(e));
+                        }
+                    }
+                } else {
+                    log::debug!("received partial payload from {}", stream.peer_addr()?);
                 }
             }
         }

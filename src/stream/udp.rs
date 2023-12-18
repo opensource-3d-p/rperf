@@ -455,67 +455,71 @@ pub mod receiver {
 
                 log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
                 loop {
-                    match self.socket.recv_from(&mut buf) {
-                        Ok((packet_size, peer_addr)) => {
-                            log::trace!(
-                                "received {} bytes in UDP packet {} from {}",
-                                packet_size,
-                                self.stream_idx,
-                                peer_addr
-                            );
-                            if packet_size == 16 {
-                                //possible end-of-test message
-                                if buf[0..16] == self.test_definition.test_id {
-                                    //test's over
-                                    self.stop();
-                                    break;
-                                }
-                            }
-                            if packet_size < super::TEST_HEADER_SIZE as usize {
-                                log::warn!("received malformed packet with size {} for UDP stream {} from {}", packet_size, self.stream_idx, peer_addr);
-                                continue;
-                            }
-
-                            if self.process_packet(&buf, &mut history) {
-                                //NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
-                                bytes_received +=
-                                    packet_size as u64 + super::UDP_HEADER_SIZE as u64;
-
-                                let elapsed_time = start.elapsed();
-                                if elapsed_time >= super::INTERVAL {
-                                    return Some(Ok(Box::new(super::UdpReceiveResult {
-                                        timestamp: super::get_unix_timestamp(),
-
-                                        stream_idx: self.stream_idx,
-
-                                        duration: elapsed_time.as_secs_f32(),
-
-                                        bytes_received,
-                                        packets_received: history.packets_received,
-                                        packets_lost: history.packets_lost,
-                                        packets_out_of_order: history.packets_out_of_order,
-                                        packets_duplicated: history.packets_duplicated,
-
-                                        unbroken_sequence: history.longest_unbroken_sequence,
-                                        jitter_seconds: history.longest_jitter_seconds,
-                                    })));
-                                }
-                            } else {
-                                log::warn!(
-                                    "received packet unrelated to UDP stream {} from {}",
-                                    self.stream_idx,
-                                    peer_addr
-                                );
-                                continue;
-                            }
-                        }
+                    let (packet_size, peer_addr) = match self.socket.recv_from(&mut buf) {
+                        Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            //receive timeout
+                            // receive timeout
                             break;
                         }
                         Err(e) => {
                             return Some(Err(Box::new(e)));
                         }
+                    };
+
+                    log::trace!(
+                        "received {} bytes in UDP packet {} from {}",
+                        packet_size,
+                        self.stream_idx,
+                        peer_addr
+                    );
+                    if packet_size == 16 {
+                        // possible end-of-test message
+                        if buf[0..16] == self.test_definition.test_id {
+                            // test's over
+                            self.stop();
+                            break;
+                        }
+                    }
+                    if packet_size < super::TEST_HEADER_SIZE as usize {
+                        log::warn!(
+                            "received malformed packet with size {} for UDP stream {} from {}",
+                            packet_size,
+                            self.stream_idx,
+                            peer_addr
+                        );
+                        continue;
+                    }
+
+                    if self.process_packet(&buf, &mut history) {
+                        // NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
+                        bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
+
+                        let elapsed_time = start.elapsed();
+                        if elapsed_time >= super::INTERVAL {
+                            return Some(Ok(Box::new(super::UdpReceiveResult {
+                                timestamp: super::get_unix_timestamp(),
+
+                                stream_idx: self.stream_idx,
+
+                                duration: elapsed_time.as_secs_f32(),
+
+                                bytes_received,
+                                packets_received: history.packets_received,
+                                packets_lost: history.packets_lost,
+                                packets_out_of_order: history.packets_out_of_order,
+                                packets_duplicated: history.packets_duplicated,
+
+                                unbroken_sequence: history.longest_unbroken_sequence,
+                                jitter_seconds: history.longest_jitter_seconds,
+                            })));
+                        }
+                    } else {
+                        log::warn!(
+                            "received packet unrelated to UDP stream {} from {}",
+                            self.stream_idx,
+                            peer_addr
+                        );
+                        continue;
                     }
                 }
             }

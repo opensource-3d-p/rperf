@@ -18,31 +18,34 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::net::{IpAddr, Shutdown, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
+use crate::{
+    args,
+    protocol::{
+        communication::{receive, send, KEEPALIVE_DURATION},
+        messaging::{
+            prepare_begin, prepare_download_configuration, prepare_end,
+            prepare_upload_configuration,
+        },
+        results::ClientDoneResult,
+        results::{
+            IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults,
+        },
+    },
+    stream::{tcp, udp, TestStream},
+};
 use mio::net::TcpStream;
-
-use crate::args;
-use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
-
-use crate::protocol::messaging::{
-    prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration,
+use std::{
+    error::Error,
+    net::{IpAddr, Shutdown, ToSocketAddrs},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::channel,
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::protocol::results::{
-    IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults,
-};
-
-use crate::stream::tcp;
-use crate::stream::udp;
-use crate::stream::TestStream;
-
-use std::error::Error;
 type BoxResult<T> = Result<T, Box<dyn Error>>;
 
 /// when false, the system is shutting down
@@ -381,40 +384,40 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
                 loop {
                     let mut test = c_ps.lock().unwrap();
                     log::debug!("beginning test-interval for stream {}", test.get_idx());
-                    match test.run_interval() {
-                        Some(interval_result) => match interval_result {
-                            Ok(ir) => match c_results_tx.send(ir) {
+
+                    let interval_result = match test.run_interval() {
+                        Some(interval_result) => interval_result,
+                        None => {
+                            match c_results_tx.send(Box::new(ClientDoneResult {
+                                stream_idx: test.get_idx(),
+                            })) {
                                 Ok(_) => (),
                                 Err(e) => {
-                                    log::error!("unable to report interval-result: {}", e);
-                                    break;
+                                    log::error!("unable to report interval-done-result: {}", e)
                                 }
-                            },
+                            }
+                            break;
+                        }
+                    };
+
+                    match interval_result {
+                        Ok(ir) => match c_results_tx.send(ir) {
+                            Ok(_) => (),
                             Err(e) => {
-                                log::error!("unable to process stream: {}", e);
-                                match c_results_tx.send(Box::new(
-                                    crate::protocol::results::ClientFailedResult {
-                                        stream_idx: test.get_idx(),
-                                    },
-                                )) {
-                                    Ok(_) => (),
-                                    Err(e) => log::error!(
-                                        "unable to report interval-failed-result: {}",
-                                        e
-                                    ),
-                                }
+                                log::error!("unable to report interval-result: {}", e);
                                 break;
                             }
                         },
-                        None => {
+                        Err(e) => {
+                            log::error!("unable to process stream: {}", e);
                             match c_results_tx.send(Box::new(
-                                crate::protocol::results::ClientDoneResult {
+                                crate::protocol::results::ClientFailedResult {
                                     stream_idx: test.get_idx(),
                                 },
                             )) {
                                 Ok(_) => (),
                                 Err(e) => {
-                                    log::error!("unable to report interval-done-result: {}", e)
+                                    log::error!("unable to report interval-failed-result: {}", e)
                                 }
                             }
                             break;
@@ -427,63 +430,77 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
 
         //watch for events from the server
         while is_alive() {
-            match receive(&mut stream, is_alive, &mut results_handler) {
-                Ok(payload) => {
-                    match payload.get("kind") {
-                        Some(kind) => {
-                            match kind.as_str().unwrap_or_default() {
-                                "receive" | "send" => { //receive/send-results from the server
-                                    if !display_json {
-                                        let result = crate::protocol::results::interval_result_from_json(payload.clone())?;
-                                        println!("{}", result.to_string(display_bit));
-                                    }
-                                    let mut tr = test_results.lock().unwrap();
-                                    tr.update_from_json(payload)?;
-                                },
-                                "done" | "failed" => match payload.get("stream_idx") { //completion-result from the server
-                                    Some(stream_idx) => match stream_idx.as_i64() {
-                                        Some(idx64) => {
-                                            let mut tr = test_results.lock().unwrap();
-                                            match kind.as_str().unwrap() {
-                                                "done" => {
-                                                    log::info!("server reported completion of stream {}", idx64);
-                                                },
-                                                "failed" => {
-                                                    log::warn!("server reported failure with stream {}", idx64);
-                                                    tr.mark_stream_done(&(idx64 as u8), false);
-                                                },
-                                                _ => (), //not possible
-                                            }
-                                            tr.mark_stream_done_server(&(idx64 as u8));
-                                            if tr.count_in_progress_streams() == 0 && tr.count_in_progress_streams_server() == 0 { //all data gathered from both sides
-                                                kill();
-                                            }
-                                        },
-                                        None => log::error!("completion from server did not include a valid stream_idx"),
-                                    },
-                                    None => log::error!("completion from server did not include stream_idx"),
-                                },
-                                _ => {
-                                    log::error!("invalid data from {}: {}", stream.peer_addr()?, serde_json::to_string(&connection_payload)?);
-                                    break;
-                                },
+            let payload = match receive(&mut stream, is_alive, &mut results_handler) {
+                Ok(payload) => payload,
+                Err(e) => {
+                    if !complete {
+                        // when complete, this also occurs
+                        return Err(e);
+                    }
+                    break;
+                }
+            };
+
+            let kind = match payload.get("kind") {
+                Some(kind) => kind,
+                None => {
+                    log::error!(
+                        "invalid data from {}: {}",
+                        stream.peer_addr()?,
+                        serde_json::to_string(&connection_payload)?
+                    );
+                    break;
+                }
+            };
+
+            match kind.as_str().unwrap_or_default() {
+                "receive" | "send" => {
+                    //receive/send-results from the server
+                    if !display_json {
+                        let result =
+                            crate::protocol::results::interval_result_from_json(payload.clone())?;
+                        println!("{}", result.to_string(display_bit));
+                    }
+                    let mut tr = test_results.lock().unwrap();
+                    tr.update_from_json(payload)?;
+                }
+                "done" | "failed" => match payload.get("stream_idx") {
+                    //completion-result from the server
+                    Some(stream_idx) => match stream_idx.as_i64() {
+                        Some(idx64) => {
+                            let mut tr = test_results.lock().unwrap();
+                            match kind.as_str().unwrap() {
+                                "done" => {
+                                    log::info!("server reported completion of stream {}", idx64);
+                                }
+                                "failed" => {
+                                    log::warn!("server reported failure with stream {}", idx64);
+                                    tr.mark_stream_done(&(idx64 as u8), false);
+                                }
+                                _ => (), //not possible
+                            }
+                            tr.mark_stream_done_server(&(idx64 as u8));
+                            if tr.count_in_progress_streams() == 0
+                                && tr.count_in_progress_streams_server() == 0
+                            {
+                                //all data gathered from both sides
+                                kill();
                             }
                         }
                         None => {
-                            log::error!(
-                                "invalid data from {}: {}",
-                                stream.peer_addr()?,
-                                serde_json::to_string(&connection_payload)?
-                            );
-                            break;
+                            log::error!("completion from server did not include a valid stream_idx")
                         }
+                    },
+                    None => {
+                        log::error!("completion from server did not include stream_idx")
                     }
-                }
-                Err(e) => {
-                    if !complete {
-                        //when complete, this also occurs
-                        return Err(e);
-                    }
+                },
+                _ => {
+                    log::error!(
+                        "invalid data from {}: {}",
+                        stream.peer_addr()?,
+                        serde_json::to_string(&connection_payload)?
+                    );
                     break;
                 }
             }

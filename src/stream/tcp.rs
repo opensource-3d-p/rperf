@@ -304,86 +304,82 @@ pub mod receiver {
                 for event in events.iter() {
                     event.token();
                     loop {
-                        match listener.accept() {
-                            Ok((stream, address)) => {
-                                log::debug!(
-                                    "received TCP stream {} connection from {}",
-                                    self.stream_idx,
-                                    address
-                                );
-
-                                let mut verification_stream = stream.try_clone()?;
-                                let mio_token2 = Token(0);
-                                let poll2 = Poll::new()?;
-                                poll2.register(
-                                    &verification_stream,
-                                    mio_token2,
-                                    Ready::readable(),
-                                    PollOpt::edge(),
-                                )?;
-
-                                let mut buffer = [0_u8; 16];
-                                let mut events2 = Events::with_capacity(1);
-                                poll2.poll(&mut events2, Some(RECEIVE_TIMEOUT))?;
-                                for event2 in events2.iter() {
-                                    event2.token();
-                                    match verification_stream.read(&mut buffer) {
-                                        Ok(_) => {
-                                            if buffer == self.test_definition.test_id {
-                                                log::debug!(
-                                                    "validated TCP stream {} connection from {}",
-                                                    self.stream_idx,
-                                                    address
-                                                );
-                                                if !cfg!(windows) {
-                                                    //NOTE: features unsupported on Windows
-                                                    if self.receive_buffer != 0 {
-                                                        log::debug!(
-                                                            "setting receive-buffer to {}...",
-                                                            self.receive_buffer
-                                                        );
-                                                        super::setsockopt(
-                                                            stream.as_raw_fd(),
-                                                            super::RcvBuf,
-                                                            &self.receive_buffer,
-                                                        )?;
-                                                    }
-                                                }
-
-                                                self.mio_poll.register(
-                                                    &stream,
-                                                    self.mio_poll_token,
-                                                    Ready::readable(),
-                                                    PollOpt::edge(),
-                                                )?;
-                                                return Ok(stream);
-                                            }
-                                        }
-                                        Err(ref e)
-                                            if e.kind() == std::io::ErrorKind::WouldBlock =>
-                                        {
-                                            //client didn't provide anything
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            return Err(Box::new(e));
-                                        }
-                                    }
-                                }
-                                log::warn!(
-                                    "could not validate TCP stream {} connection from {}",
-                                    self.stream_idx,
-                                    address
-                                );
-                            }
+                        let (stream, address) = match listener.accept() {
+                            Ok((stream, address)) => (stream, address),
                             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                //nothing to do
+                                // nothing to do
                                 break;
                             }
                             Err(e) => {
                                 return Err(Box::new(e));
                             }
+                        };
+
+                        log::debug!(
+                            "received TCP stream {} connection from {}",
+                            self.stream_idx,
+                            address
+                        );
+
+                        let mut verification_stream = stream.try_clone()?;
+                        let mio_token2 = Token(0);
+                        let poll2 = Poll::new()?;
+                        poll2.register(
+                            &verification_stream,
+                            mio_token2,
+                            Ready::readable(),
+                            PollOpt::edge(),
+                        )?;
+
+                        let mut buffer = [0_u8; 16];
+                        let mut events2 = Events::with_capacity(1);
+                        poll2.poll(&mut events2, Some(RECEIVE_TIMEOUT))?;
+                        for event2 in events2.iter() {
+                            event2.token();
+
+                            if let Err(e) = verification_stream.read(&mut buffer) {
+                                if e.kind() == std::io::ErrorKind::WouldBlock {
+                                    // client didn't provide anything
+                                    break;
+                                }
+                                return Err(Box::new(e));
+                            }
+
+                            if buffer == self.test_definition.test_id {
+                                log::debug!(
+                                    "validated TCP stream {} connection from {}",
+                                    self.stream_idx,
+                                    address
+                                );
+                                if !cfg!(windows) {
+                                    // NOTE: features unsupported on Windows
+                                    if self.receive_buffer != 0 {
+                                        log::debug!(
+                                            "setting receive-buffer to {}...",
+                                            self.receive_buffer
+                                        );
+                                        super::setsockopt(
+                                            stream.as_raw_fd(),
+                                            super::RcvBuf,
+                                            &self.receive_buffer,
+                                        )?;
+                                    }
+                                }
+
+                                self.mio_poll.register(
+                                    &stream,
+                                    self.mio_poll_token,
+                                    Ready::readable(),
+                                    PollOpt::edge(),
+                                )?;
+                                return Ok(stream);
+                            }
                         }
+                        log::warn!(
+                            "could not validate TCP stream {} connection from {}",
+                            self.stream_idx,
+                            address
+                        );
                     }
                 }
             }
@@ -444,43 +440,43 @@ pub mod receiver {
                 for event in events.iter() {
                     if event.token() == self.mio_poll_token {
                         loop {
-                            match stream.read(&mut buf) {
-                                Ok(packet_size) => {
-                                    log::trace!(
-                                        "received {} bytes in TCP stream {} from {}",
-                                        packet_size,
-                                        self.stream_idx,
-                                        peer_addr
-                                    );
-                                    if packet_size == 0 {
-                                        //test's over
-                                        //HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
-                                        self.active.store(false, Relaxed);
-                                        break;
-                                    }
-
-                                    bytes_received += packet_size as u64;
-
-                                    let elapsed_time = start.elapsed();
-                                    if elapsed_time >= super::INTERVAL {
-                                        return Some(Ok(Box::new(super::TcpReceiveResult {
-                                            timestamp: super::get_unix_timestamp(),
-
-                                            stream_idx: self.stream_idx,
-
-                                            duration: elapsed_time.as_secs_f32(),
-
-                                            bytes_received,
-                                        })));
-                                    }
-                                }
+                            let packet_size = match stream.read(&mut buf) {
+                                Ok(packet_size) => packet_size,
                                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                    //receive timeout
+                                    // receive timeout
                                     break;
                                 }
                                 Err(e) => {
                                     return Some(Err(Box::new(e)));
                                 }
+                            };
+
+                            log::trace!(
+                                "received {} bytes in TCP stream {} from {}",
+                                packet_size,
+                                self.stream_idx,
+                                peer_addr
+                            );
+                            if packet_size == 0 {
+                                // test's over
+                                // HACK: can't call self.stop() because it's a double-borrow due to the unwrapped stream
+                                self.active.store(false, Relaxed);
+                                break;
+                            }
+
+                            bytes_received += packet_size as u64;
+
+                            let elapsed_time = start.elapsed();
+                            if elapsed_time >= super::INTERVAL {
+                                return Some(Ok(Box::new(super::TcpReceiveResult {
+                                    timestamp: super::get_unix_timestamp(),
+
+                                    stream_idx: self.stream_idx,
+
+                                    duration: elapsed_time.as_secs_f32(),
+
+                                    bytes_received,
+                                })));
                             }
                         }
                     } else {
@@ -687,46 +683,46 @@ pub mod sender {
                 );
                 let packet_start = Instant::now();
 
-                match stream.write(&self.staged_buffer) {
-                    //it doesn't matter if the whole thing couldn't be written, since it's just garbage data
-                    Ok(packet_size) => {
-                        log::trace!(
-                            "wrote {} bytes in TCP stream {} to {}",
-                            packet_size,
-                            self.stream_idx,
-                            peer_addr
-                        );
-
-                        let bytes_written = packet_size as i64;
-                        bytes_sent += bytes_written as u64;
-                        bytes_to_send_remaining -= bytes_written;
-                        bytes_to_send_per_interval_slice_remaining -= bytes_written;
-
-                        let elapsed_time = cycle_start.elapsed();
-                        if elapsed_time >= super::INTERVAL {
-                            self.remaining_duration -= packet_start.elapsed().as_secs_f32();
-
-                            return Some(Ok(Box::new(super::TcpSendResult {
-                                timestamp: super::get_unix_timestamp(),
-
-                                stream_idx: self.stream_idx,
-
-                                duration: elapsed_time.as_secs_f32(),
-
-                                bytes_sent,
-                                sends_blocked,
-                            })));
-                        }
-                    }
+                let packet_size = match stream.write(&self.staged_buffer) {
+                    // it doesn't matter if the whole thing couldn't be written, since it's just garbage data
+                    Ok(packet_size) => packet_size,
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        //send-buffer is full
-                        //nothing to do, but avoid burning CPU cycles
+                        // send-buffer is full
+                        // nothing to do, but avoid burning CPU cycles
                         sleep(BUFFER_FULL_TIMEOUT);
                         sends_blocked += 1;
+                        continue;
                     }
                     Err(e) => {
                         return Some(Err(Box::new(e)));
                     }
+                };
+                log::trace!(
+                    "wrote {} bytes in TCP stream {} to {}",
+                    packet_size,
+                    self.stream_idx,
+                    peer_addr
+                );
+
+                let bytes_written = packet_size as i64;
+                bytes_sent += bytes_written as u64;
+                bytes_to_send_remaining -= bytes_written;
+                bytes_to_send_per_interval_slice_remaining -= bytes_written;
+
+                let elapsed_time = cycle_start.elapsed();
+                if elapsed_time >= super::INTERVAL {
+                    self.remaining_duration -= packet_start.elapsed().as_secs_f32();
+
+                    return Some(Ok(Box::new(super::TcpSendResult {
+                        timestamp: super::get_unix_timestamp(),
+
+                        stream_idx: self.stream_idx,
+
+                        duration: elapsed_time.as_secs_f32(),
+
+                        bytes_sent,
+                        sends_blocked,
+                    })));
                 }
 
                 if bytes_to_send_remaining <= 0 {
