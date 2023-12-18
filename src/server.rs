@@ -45,6 +45,16 @@ static ALIVE: AtomicBool = AtomicBool::new(true);
 /// a count of connected clients
 static CLIENTS: AtomicU16 = AtomicU16::new(0);
 
+fn tcp_stream_try_clone(stream: &TcpStream) -> BoxResult<TcpStream> {
+    use std::os::fd::{AsRawFd, BorrowedFd};
+    let fd = unsafe { BorrowedFd::borrow_raw(stream.as_raw_fd()) };
+    let fd = fd.try_clone_to_owned()?;
+    let socket: socket2::Socket = socket2::Socket::from(fd);
+    let stream: std::net::TcpStream = socket.into();
+    let socket = TcpStream::from_std(stream);
+    Ok(socket)
+}
+
 fn handle_client(
     stream: &mut TcpStream,
     cpu_affinity_manager: Arc<Mutex<crate::utils::cpu_affinity::CpuAffinityManager>>,
@@ -64,7 +74,7 @@ fn handle_client(
     ) = channel();
 
     //a closure used to pass results from stream-handlers to the client-communication stream
-    let mut forwarding_send_stream = stream.try_clone()?;
+    let mut forwarding_send_stream = tcp_stream_try_clone(stream)?;
     let mut results_handler = || -> BoxResult<()> {
         // drain all results every time this closer is invoked
         while let Ok(result) = results_rx.try_recv() {
