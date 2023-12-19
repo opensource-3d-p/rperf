@@ -11,17 +11,19 @@ categories = ["network-utilities"]
 readme = "README.md"
 
 [dependencies]
+cfg-if = "1.0"
 chrono = "0.4"
 clap = { version = "4.4", features = ["derive", "wrap_help"] }
 core_affinity = "0.8"
-ctrlc2 = "3.5"
+ctrlc2 = { version = "3.5", features = ["termination"] }
 env_logger = "0.10"
 log = { version = "0.4", features = ["std"] }
-mio = "0.6"
-nix = "0.20"
+mio = { version = "0.8", features = ["log", "os-poll", "net"] }
+nix = { version = "0.27", features = ["net"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simple-error = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
 uuid = { version = "1.6", features = ["v4"] }
 
 #configuration for cargo-deb

@@ -22,13 +22,12 @@ use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use mio::net::TcpStream;
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Interest, Poll};
 
-use std::error::Error;
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+use crate::BoxResult;
 
 /// how long to wait for keepalive events
-// the communications channels typically exchange data every second, so 2s is reasonable to avoid excess noise
+/// the communications channels typically exchange data every second, so 2s is reasonable to avoid excess noise
 pub const KEEPALIVE_DURATION: Duration = Duration::from_secs(2);
 
 /// how long to block on polling operations
@@ -52,39 +51,40 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
 
 /// receives the length-count of a pending message over a client-server communications stream
 fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_handler: &mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
-    let mut cloned_stream = stream.try_clone()?;
-
-    let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(&cloned_stream, mio_token, Ready::readable(), PollOpt::edge())?;
+    let mio_token = crate::get_global_token();
+    let mut poll = Poll::new()?;
+    poll.registry().register(stream, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(1); //only interacting with one stream
 
     let mut length_bytes_read = 0;
     let mut length_spec: [u8; 2] = [0; 2];
-    while alive_check() {
+    let result: BoxResult<u16> = 'exiting: loop {
+        if !alive_check() {
+            break 'exiting Ok(0);
+        }
         //waiting to find out how long the next message is
         results_handler()?; //send any outstanding results between cycles
         poll.poll(&mut events, Some(POLL_TIMEOUT))?;
         for event in events.iter() {
             event.token();
             loop {
-                let size = match cloned_stream.read(&mut length_spec[length_bytes_read..]) {
+                let size = match stream.read(&mut length_spec[length_bytes_read..]) {
                     Ok(size) => size,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         //nothing left to process
                         break;
                     }
                     Err(e) => {
-                        return Err(Box::new(e));
+                        break 'exiting Err(Box::new(e));
                     }
                 };
 
                 if size == 0 {
                     if alive_check() {
-                        return Err(Box::new(simple_error::simple_error!("connection lost")));
+                        break 'exiting Err(Box::new(simple_error::simple_error!("connection lost")));
                     } else {
                         //shutting down; a disconnect is expected
-                        return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                        break 'exiting Err(Box::new(simple_error::simple_error!("local shutdown requested")));
                     }
                 }
 
@@ -92,15 +92,17 @@ fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_han
                 if length_bytes_read == 2 {
                     let length = u16::from_be_bytes(length_spec);
                     log::debug!("received length-spec of {} from {}", length, stream.peer_addr()?);
-                    return Ok(length);
+                    break 'exiting Ok(length);
                 } else {
                     log::debug!("received partial length-spec from {}", stream.peer_addr()?);
                 }
             }
         }
-    }
-    Err(Box::new(simple_error::simple_error!("system shutting down")))
+    };
+    poll.registry().deregister(stream)?;
+    result
 }
+
 /// receives the data-value of a pending message over a client-server communications stream
 fn receive_payload(
     stream: &mut TcpStream,
@@ -108,39 +110,40 @@ fn receive_payload(
     results_handler: &mut dyn FnMut() -> BoxResult<()>,
     length: u16,
 ) -> BoxResult<serde_json::Value> {
-    let mut cloned_stream = stream.try_clone()?;
-
-    let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(&cloned_stream, mio_token, Ready::readable(), PollOpt::edge())?;
+    let mio_token = crate::get_global_token();
+    let mut poll = Poll::new()?;
+    poll.registry().register(stream, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(1); //only interacting with one stream
 
     let mut bytes_read = 0;
     let mut buffer = vec![0_u8; length.into()];
-    while alive_check() {
+    let result: BoxResult<serde_json::Value> = 'exiting: loop {
+        if !alive_check() {
+            break 'exiting Ok(serde_json::from_slice(&buffer[0..0])?);
+        }
         //waiting to receive the payload
         results_handler()?; //send any outstanding results between cycles
         poll.poll(&mut events, Some(POLL_TIMEOUT))?;
         for event in events.iter() {
             event.token();
             loop {
-                let size = match cloned_stream.read(&mut buffer[bytes_read..]) {
+                let size = match stream.read(&mut buffer[bytes_read..]) {
                     Ok(size) => size,
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         // nothing left to process
                         break;
                     }
                     Err(e) => {
-                        return Err(Box::new(e));
+                        break 'exiting Err(Box::new(e));
                     }
                 };
 
                 if size == 0 {
                     if alive_check() {
-                        return Err(Box::new(simple_error::simple_error!("connection lost")));
+                        break 'exiting Err(Box::new(simple_error::simple_error!("connection lost")));
                     } else {
                         // shutting down; a disconnect is expected
-                        return Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                        break 'exiting Err(Box::new(simple_error::simple_error!("local shutdown requested")));
                     }
                 }
 
@@ -149,10 +152,10 @@ fn receive_payload(
                     match serde_json::from_slice(&buffer) {
                         Ok(v) => {
                             log::debug!("received {:?} from {}", v, stream.peer_addr()?);
-                            return Ok(v);
+                            break 'exiting Ok(v);
                         }
                         Err(e) => {
-                            return Err(Box::new(e));
+                            break 'exiting Err(Box::new(e));
                         }
                     }
                 } else {
@@ -160,9 +163,11 @@ fn receive_payload(
                 }
             }
         }
-    }
-    Err(Box::new(simple_error::simple_error!("system shutting down")))
+    };
+    poll.registry().deregister(stream)?;
+    result
 }
+
 /// handles the full process of retrieving a message from a client-server communications stream
 pub fn receive(
     stream: &mut TcpStream,

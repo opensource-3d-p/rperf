@@ -18,18 +18,10 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-extern crate log;
-extern crate nix;
-
-use std::error::Error;
-
-use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
-
 use crate::protocol::results::{get_unix_timestamp, IntervalResult, UdpReceiveResult, UdpSendResult};
+use crate::BoxResult;
 
 use super::{parse_port_spec, TestStream, INTERVAL};
-
-type BoxResult<T> = Result<T, Box<dyn Error>>;
 
 pub const TEST_HEADER_SIZE: u16 = 36;
 const UDP_HEADER_SIZE: u16 = 8;
@@ -84,7 +76,6 @@ impl UdpTestDefinition {
 pub mod receiver {
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::sync::Mutex;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -224,6 +215,7 @@ pub mod receiver {
         socket: UdpSocket,
     }
     impl UdpReceiver {
+        #[allow(unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
             stream_idx: &u8,
@@ -234,12 +226,12 @@ pub mod receiver {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip).expect("failed to bind UDP socket");
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
-            if !cfg!(windows) {
-                //NOTE: features unsupported on Windows
-                if *receive_buffer != 0 {
-                    log::debug!("setting receive-buffer to {}...", receive_buffer);
-                    super::setsockopt(socket.as_raw_fd(), super::RcvBuf, receive_buffer)?;
-                }
+            // NOTE: features unsupported on Windows
+            #[cfg(unix)]
+            if *receive_buffer != 0 {
+                log::debug!("setting receive-buffer to {}...", receive_buffer);
+                use nix::sys::socket::{setsockopt, sockopt::RcvBuf};
+                setsockopt(&socket, RcvBuf, receive_buffer)?;
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
@@ -498,7 +490,6 @@ pub mod receiver {
 
 pub mod sender {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use std::net::UdpSocket;
@@ -523,7 +514,7 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        #[allow(clippy::too_many_arguments)]
+        #[allow(clippy::too_many_arguments, unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
             stream_idx: &u8,
@@ -543,12 +534,12 @@ pub mod sender {
                     .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port)),
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
-            if !cfg!(windows) {
-                //NOTE: features unsupported on Windows
-                if *send_buffer != 0 {
-                    log::debug!("setting send-buffer to {}...", send_buffer);
-                    super::setsockopt(socket.as_raw_fd(), super::SndBuf, send_buffer)?;
-                }
+            // NOTE: features unsupported on Windows
+            #[cfg(unix)]
+            if *send_buffer != 0 {
+                log::debug!("setting send-buffer to {}...", send_buffer);
+                use nix::sys::socket::{setsockopt, sockopt::SndBuf};
+                setsockopt(&socket, SndBuf, send_buffer)?;
             }
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);

@@ -18,18 +18,14 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-mod args;
-mod client;
-mod protocol;
-mod server;
-mod stream;
-mod utils;
+use rperf::{args, client, server, BoxResult};
 
-fn main() {
+fn main() -> BoxResult<()> {
     use clap::Parser;
     let args = args::Args::parse();
 
-    let mut env = env_logger::Env::default().filter_or("RUST_LOG", "info");
+    let default = args.verbosity.to_string();
+    let mut env = env_logger::Env::default().filter_or("RUST_LOG", &default);
     if args.debug {
         env = env.filter_or("RUST_LOG", "debug");
     }
@@ -37,7 +33,7 @@ fn main() {
 
     if args.server {
         log::debug!("registering SIGINT handler...");
-        ctrlc2::set_handler(move || {
+        let exiting = ctrlc2::set_handler(move || {
             if server::kill() {
                 log::warn!("shutdown requested; please allow a moment for any in-progress tests to stop");
             } else {
@@ -45,15 +41,11 @@ fn main() {
                 std::process::exit(3);
             }
             true
-        })
-        .expect("unable to set SIGINT handler");
+        })?;
 
         log::debug!("beginning normal operation...");
-        let service = server::serve(&args);
-        if service.is_err() {
-            log::error!("unable to run server: {}", service.unwrap_err());
-            std::process::exit(4);
-        }
+        server::serve(&args)?;
+        exiting.join().expect("unable to join SIGINT handler thread");
     } else if args.client.is_some() {
         log::debug!("registering SIGINT handler...");
         ctrlc2::set_handler(move || {
@@ -64,19 +56,14 @@ fn main() {
                 std::process::exit(3);
             }
             true
-        })
-        .expect("unable to set SIGINT handler");
+        })?;
 
         log::debug!("connecting to server...");
-        let execution = client::execute(&args);
-        if execution.is_err() {
-            log::error!("unable to run client: {}", execution.unwrap_err());
-            std::process::exit(4);
-        }
+        client::execute(&args)?;
     } else {
         use clap::CommandFactory;
         let mut cmd = args::Args::command();
         cmd.print_help().unwrap();
-        std::process::exit(2);
     }
+    Ok(())
 }

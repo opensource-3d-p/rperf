@@ -18,8 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::error::Error;
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+use crate::BoxResult;
 
 /// prepares a message used to tell the server to begin operations
 pub fn prepare_begin() -> serde_json::Value {

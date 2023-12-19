@@ -18,13 +18,10 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use crate::BoxResult;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-use serde::{Deserialize, Serialize};
-
-use std::error::Error;
-type BoxResult<T> = Result<T, Box<dyn Error>>;
 
 /* This module contains structures used to represent and collect the results of tests.
  * Since everything is basically just a data-container with representation methods,

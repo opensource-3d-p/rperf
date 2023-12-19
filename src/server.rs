@@ -18,7 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::error::Error;
 use std::io;
 use std::net::{Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
@@ -28,15 +27,14 @@ use std::thread;
 use std::time::Duration;
 
 use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Poll, PollOpt, Ready, Token};
+use mio::{Events, Interest, Poll};
 
 use crate::args::Args;
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
 use crate::protocol::messaging::{prepare_connect, prepare_connect_ready};
 use crate::protocol::results::ServerDoneResult;
 use crate::stream::{tcp, udp, TestStream};
-
-type BoxResult<T> = Result<T, Box<dyn Error>>;
+use crate::BoxResult;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -45,6 +43,26 @@ static ALIVE: AtomicBool = AtomicBool::new(true);
 
 /// a count of connected clients
 static CLIENTS: AtomicU16 = AtomicU16::new(0);
+
+fn tcp_stream_try_clone(stream: &TcpStream) -> BoxResult<TcpStream> {
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            use std::os::fd::{AsRawFd, BorrowedFd};
+            let fd = unsafe { BorrowedFd::borrow_raw(stream.as_raw_fd()) };
+            let fd = fd.try_clone_to_owned()?;
+            let socket: socket2::Socket = socket2::Socket::from(fd);
+        } else {
+            use std::os::windows::io::{AsRawSocket, BorrowedSocket};
+            let socket = unsafe { BorrowedSocket::borrow_raw(stream.as_raw_socket()) };
+            let socket = socket.try_clone_to_owned()?;
+            let socket: socket2::Socket = socket2::Socket::from(socket);
+        }
+    }
+
+    let stream: std::net::TcpStream = socket.into();
+    let socket = TcpStream::from_std(stream);
+    Ok(socket)
+}
 
 fn handle_client(
     stream: &mut TcpStream,
@@ -65,7 +83,7 @@ fn handle_client(
     ) = channel();
 
     //a closure used to pass results from stream-handlers to the client-communication stream
-    let mut forwarding_send_stream = stream.try_clone()?;
+    let mut forwarding_send_stream = tcp_stream_try_clone(stream)?;
     let mut results_handler = || -> BoxResult<()> {
         // drain all results every time this closer is invoked
         while let Ok(result) = results_rx.try_recv() {
@@ -316,21 +334,28 @@ pub fn serve(args: &Args) -> BoxResult<()> {
 
     //start listening for connections
     let port: u16 = args.port;
-    let listener: TcpListener =
-        TcpListener::bind(&SocketAddr::new(args.bind, port)).unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
+    let mut listener =
+        TcpListener::bind(SocketAddr::new(args.bind, port)).unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
     log::info!("server listening on {}", listener.local_addr()?);
 
-    let mio_token = Token(0);
-    let poll = Poll::new()?;
-    poll.register(&listener, mio_token, Ready::readable(), PollOpt::edge())?;
+    let mio_token = crate::get_global_token();
+    let mut poll = Poll::new()?;
+    poll.registry().register(&mut listener, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(32);
 
     while is_alive() {
-        poll.poll(&mut events, Some(POLL_TIMEOUT))?;
+        if let Err(err) = poll.poll(&mut events, Some(POLL_TIMEOUT)) {
+            if err.kind() == std::io::ErrorKind::Interrupted {
+                log::debug!("Poll interrupted: \"{err}\"");
+                continue;
+            }
+            log::error!("Poll error: {}", err);
+            break;
+        }
         for event in events.iter() {
             event.token();
             loop {
-                let (mut stream, address) = match listener.accept() {
+                let (stream, address) = match listener.accept() {
                     Ok((stream, address)) => (stream, address),
                     Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                         // nothing to do
@@ -343,8 +368,34 @@ pub fn serve(args: &Args) -> BoxResult<()> {
 
                 log::info!("connection from {}", address);
 
-                stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-                stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+                let mut stream = {
+                    cfg_if::cfg_if! {
+                        if #[cfg(unix)] {
+                            use std::os::fd::{FromRawFd, IntoRawFd};
+                            let fd = stream.into_raw_fd();
+                            let socket: socket2::Socket = unsafe { socket2::Socket::from_raw_fd(fd) };
+
+                            let keepalive = socket2::TcpKeepalive::new()
+                                .with_time(KEEPALIVE_DURATION)
+                                .with_interval(KEEPALIVE_DURATION)
+                                .with_retries(4);
+                        } else {
+                            // Only Windows supports raw sockets
+                            use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+                            let socket = stream.into_raw_socket();
+                            let socket: socket2::Socket = unsafe { socket2::Socket::from_raw_socket(socket) };
+                            let keepalive = socket2::TcpKeepalive::new()
+                                .with_time(KEEPALIVE_DURATION)
+                                .with_interval(KEEPALIVE_DURATION);
+                        }
+                    }
+                    socket.set_tcp_keepalive(&keepalive)?;
+
+                    socket.set_nodelay(true)?;
+
+                    let stream: std::net::TcpStream = socket.into();
+                    mio::net::TcpStream::from_std(stream)
+                };
 
                 let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
                 if client_limit > 0 && client_count > client_limit {
