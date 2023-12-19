@@ -45,10 +45,20 @@ static ALIVE: AtomicBool = AtomicBool::new(true);
 static CLIENTS: AtomicU16 = AtomicU16::new(0);
 
 fn tcp_stream_try_clone(stream: &TcpStream) -> BoxResult<TcpStream> {
-    use std::os::fd::{AsRawFd, BorrowedFd};
-    let fd = unsafe { BorrowedFd::borrow_raw(stream.as_raw_fd()) };
-    let fd = fd.try_clone_to_owned()?;
-    let socket: socket2::Socket = socket2::Socket::from(fd);
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            use std::os::fd::{AsRawFd, BorrowedFd};
+            let fd = unsafe { BorrowedFd::borrow_raw(stream.as_raw_fd()) };
+            let fd = fd.try_clone_to_owned()?;
+            let socket: socket2::Socket = socket2::Socket::from(fd);
+        } else {
+            use std::os::windows::io::{AsRawSocket, BorrowedSocket};
+            let socket = unsafe { BorrowedSocket::borrow_raw(stream.as_raw_socket()) };
+            let socket = socket.try_clone_to_owned()?;
+            let socket: socket2::Socket = socket2::Socket::from(socket);
+        }
+    }
+
     let stream: std::net::TcpStream = socket.into();
     let socket = TcpStream::from_std(stream);
     Ok(socket)
@@ -359,14 +369,26 @@ pub fn serve(args: &Args) -> BoxResult<()> {
                 log::info!("connection from {}", address);
 
                 let mut stream = {
-                    use std::os::fd::{FromRawFd, IntoRawFd};
-                    let fd = stream.into_raw_fd();
-                    let socket: socket2::Socket = unsafe { socket2::Socket::from_raw_fd(fd) };
+                    cfg_if::cfg_if! {
+                        if #[cfg(unix)] {
+                            use std::os::fd::{FromRawFd, IntoRawFd};
+                            let fd = stream.into_raw_fd();
+                            let socket: socket2::Socket = unsafe { socket2::Socket::from_raw_fd(fd) };
 
-                    let keepalive = socket2::TcpKeepalive::new()
-                        .with_time(KEEPALIVE_DURATION)
-                        .with_interval(KEEPALIVE_DURATION)
-                        .with_retries(4);
+                            let keepalive = socket2::TcpKeepalive::new()
+                                .with_time(KEEPALIVE_DURATION)
+                                .with_interval(KEEPALIVE_DURATION)
+                                .with_retries(4);
+                        } else {
+                            // Only Windows supports raw sockets
+                            use std::os::windows::io::{FromRawSocket, IntoRawSocket};
+                            let socket = stream.into_raw_socket();
+                            let socket: socket2::Socket = unsafe { socket2::Socket::from_raw_socket(socket) };
+                            let keepalive = socket2::TcpKeepalive::new()
+                                .with_time(KEEPALIVE_DURATION)
+                                .with_interval(KEEPALIVE_DURATION);
+                        }
+                    }
                     socket.set_tcp_keepalive(&keepalive)?;
 
                     socket.set_nodelay(true)?;

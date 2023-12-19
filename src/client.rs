@@ -67,8 +67,12 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
         let socket: socket2::Socket = socket2::Socket::from(stream);
         let keepalive = socket2::TcpKeepalive::new()
             .with_time(KEEPALIVE_DURATION)
-            .with_interval(KEEPALIVE_DURATION)
-            .with_retries(4);
+            .with_interval(KEEPALIVE_DURATION);
+        cfg_if::cfg_if! {
+            if #[cfg(unix)] {
+                let keepalive = keepalive.with_retries(4);
+            }
+        }
         socket.set_tcp_keepalive(&keepalive)?;
         socket.set_nodelay(true)?;
 

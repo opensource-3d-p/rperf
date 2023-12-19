@@ -18,8 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
-
 use crate::protocol::results::{get_unix_timestamp, IntervalResult, UdpReceiveResult, UdpSendResult};
 use crate::BoxResult;
 
@@ -217,6 +215,7 @@ pub mod receiver {
         socket: UdpSocket,
     }
     impl UdpReceiver {
+        #[allow(unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
             stream_idx: &u8,
@@ -231,7 +230,8 @@ pub mod receiver {
             #[cfg(unix)]
             if *receive_buffer != 0 {
                 log::debug!("setting receive-buffer to {}...", receive_buffer);
-                super::setsockopt(&socket, super::RcvBuf, receive_buffer)?;
+                use nix::sys::socket::{setsockopt, sockopt::RcvBuf};
+                setsockopt(&socket, RcvBuf, receive_buffer)?;
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
@@ -514,7 +514,7 @@ pub mod sender {
         staged_packet: Vec<u8>,
     }
     impl UdpSender {
-        #[allow(clippy::too_many_arguments)]
+        #[allow(clippy::too_many_arguments, unused_variables)]
         pub fn new(
             test_definition: super::UdpTestDefinition,
             stream_idx: &u8,
@@ -538,7 +538,8 @@ pub mod sender {
             #[cfg(unix)]
             if *send_buffer != 0 {
                 log::debug!("setting send-buffer to {}...", send_buffer);
-                super::setsockopt(&socket, super::SndBuf, send_buffer)?;
+                use nix::sys::socket::{setsockopt, sockopt::SndBuf};
+                setsockopt(&socket, SndBuf, send_buffer)?;
             }
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);

@@ -27,7 +27,7 @@ use mio::{Events, Interest, Poll};
 use crate::BoxResult;
 
 /// how long to wait for keepalive events
-// the communications channels typically exchange data every second, so 2s is reasonable to avoid excess noise
+/// the communications channels typically exchange data every second, so 2s is reasonable to avoid excess noise
 pub const KEEPALIVE_DURATION: Duration = Duration::from_secs(2);
 
 /// how long to block on polling operations
@@ -101,8 +101,8 @@ fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_han
     };
     poll.registry().deregister(stream)?;
     result
-    // Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
+
 /// receives the data-value of a pending message over a client-server communications stream
 fn receive_payload(
     stream: &mut TcpStream,
@@ -166,8 +166,8 @@ fn receive_payload(
     };
     poll.registry().deregister(stream)?;
     result
-    // Err(Box::new(simple_error::simple_error!("system shutting down")))
 }
+
 /// handles the full process of retrieving a message from a client-server communications stream
 pub fn receive(
     stream: &mut TcpStream,

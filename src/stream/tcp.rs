@@ -18,8 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
-
 use crate::protocol::results::{get_unix_timestamp, IntervalResult, TcpReceiveResult, TcpSendResult};
 use crate::BoxResult;
 
@@ -192,6 +190,7 @@ pub mod receiver {
         }
     }
 
+    #[allow(dead_code)]
     pub struct TcpReceiver {
         active: AtomicBool,
         test_definition: super::TcpTestDefinition,
@@ -300,7 +299,8 @@ pub mod receiver {
 
                                     use std::os::fd::{FromRawFd, IntoRawFd};
                                     let raw_stream = unsafe { std::net::TcpStream::from_raw_fd(stream.into_raw_fd()) };
-                                    super::setsockopt(&raw_stream, super::RcvBuf, &self.receive_buffer)?;
+                                    use nix::sys::socket::{setsockopt, sockopt::RcvBuf};
+                                    setsockopt(&raw_stream, RcvBuf, &self.receive_buffer)?;
                                     stream = unsafe { TcpStream::from_raw_fd(raw_stream.into_raw_fd()) };
                                 }
 
@@ -457,6 +457,7 @@ pub mod sender {
     const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
     const BUFFER_FULL_TIMEOUT: Duration = Duration::from_millis(1);
 
+    #[allow(dead_code)]
     pub struct TcpSender {
         active: bool,
         test_definition: super::TcpTestDefinition,
@@ -530,7 +531,8 @@ pub mod sender {
             #[cfg(unix)]
             if self.send_buffer != 0 {
                 log::debug!("setting send-buffer to {}...", self.send_buffer);
-                super::setsockopt(&raw_stream, super::SndBuf, &self.send_buffer)?;
+                use nix::sys::socket::{setsockopt, sockopt::SndBuf};
+                setsockopt(&raw_stream, SndBuf, &self.send_buffer)?;
             }
 
             raw_stream.set_write_timeout(Some(WRITE_TIMEOUT))?;

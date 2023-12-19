@@ -41,8 +41,7 @@ fn main() -> BoxResult<()> {
                 std::process::exit(3);
             }
             true
-        })
-        .expect("unable to set SIGINT handler");
+        })?;
 
         log::debug!("beginning normal operation...");
         server::serve(&args)?;
@@ -57,8 +56,7 @@ fn main() -> BoxResult<()> {
                 std::process::exit(3);
             }
             true
-        })
-        .expect("unable to set SIGINT handler");
+        })?;
 
         log::debug!("connecting to server...");
         client::execute(&args)?;
