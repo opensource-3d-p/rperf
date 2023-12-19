@@ -18,9 +18,9 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use rperf::{args, client, server};
+use rperf::{args, client, server, BoxResult};
 
-fn main() {
+fn main() -> BoxResult<()> {
     use clap::Parser;
     let args = args::Args::parse();
 
@@ -45,12 +45,8 @@ fn main() {
         .expect("unable to set SIGINT handler");
 
         log::debug!("beginning normal operation...");
-        let service = server::serve(&args);
+        server::serve(&args)?;
         exiting.join().expect("unable to join SIGINT handler thread");
-        if service.is_err() {
-            log::error!("unable to run server: {}", service.unwrap_err());
-            std::process::exit(4);
-        }
     } else if args.client.is_some() {
         log::debug!("registering SIGINT handler...");
         ctrlc2::set_handler(move || {
@@ -65,15 +61,11 @@ fn main() {
         .expect("unable to set SIGINT handler");
 
         log::debug!("connecting to server...");
-        let execution = client::execute(&args);
-        if execution.is_err() {
-            log::error!("unable to run client: {}", execution.unwrap_err());
-            std::process::exit(4);
-        }
+        client::execute(&args)?;
     } else {
         use clap::CommandFactory;
         let mut cmd = args::Args::command();
         cmd.print_help().unwrap();
-        std::process::exit(2);
     }
+    Ok(())
 }

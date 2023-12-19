@@ -82,7 +82,7 @@ pub mod receiver {
     use std::time::{Duration, Instant};
 
     use mio::net::{TcpListener, TcpStream};
-    use mio::{Events, Interest, Poll, Token};
+    use mio::{Events, Interest, Poll};
 
     const POLL_TIMEOUT: Duration = Duration::from_millis(250);
     const RECEIVE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -199,11 +199,12 @@ pub mod receiver {
 
         listener: Option<TcpListener>,
         stream: Option<TcpStream>,
-        mio_poll_token: Token,
+        mio_poll_token: mio::Token,
         mio_poll: Poll,
 
         receive_buffer: usize,
     }
+
     impl TcpReceiver {
         pub fn new(
             test_definition: super::TcpTestDefinition,
@@ -216,9 +217,6 @@ pub mod receiver {
             let listener: TcpListener = port_pool.bind(peer_ip).expect("failed to bind TCP socket");
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
 
-            let mio_poll_token = Token(0);
-            let mio_poll = Poll::new()?;
-
             Ok(TcpReceiver {
                 active: AtomicBool::new(true),
                 test_definition,
@@ -226,8 +224,8 @@ pub mod receiver {
 
                 listener: Some(listener),
                 stream: None,
-                mio_poll_token,
-                mio_poll,
+                mio_poll_token: crate::get_global_token(),
+                mio_poll: Poll::new()?,
 
                 receive_buffer: receive_buffer.to_owned(),
             })
@@ -237,16 +235,19 @@ pub mod receiver {
             log::debug!("preparing to receive TCP stream {} connection...", self.stream_idx);
 
             let listener = self.listener.as_mut().unwrap();
-            let mio_token = Token(0);
+            let mio_token = crate::get_global_token();
             let mut poll = Poll::new()?;
             poll.registry().register(listener, mio_token, Interest::READABLE)?;
             let mut events = Events::with_capacity(1);
 
             let start = Instant::now();
 
-            while self.active.load(Relaxed) {
+            let result: super::BoxResult<TcpStream> = 'exiting: loop {
+                if !self.active.load(Relaxed) {
+                    break 'exiting Err(Box::new(simple_error::simple_error!("local shutdown requested")));
+                }
                 if start.elapsed() >= RECEIVE_TIMEOUT {
-                    return Err(Box::new(simple_error::simple_error!(
+                    break 'exiting Err(Box::new(simple_error::simple_error!(
                         "TCP listening for stream {} timed out",
                         self.stream_idx
                     )));
@@ -263,13 +264,13 @@ pub mod receiver {
                                 break;
                             }
                             Err(e) => {
-                                return Err(Box::new(e));
+                                break 'exiting Err(Box::new(e));
                             }
                         };
 
                         log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
 
-                        let mio_token2 = Token(0);
+                        let mio_token2 = crate::get_global_token();
                         let mut poll2 = Poll::new()?;
                         poll2.registry().register(&mut stream, mio_token2, Interest::READABLE)?;
 
@@ -284,14 +285,16 @@ pub mod receiver {
                                     // client didn't provide anything
                                     break;
                                 }
-                                return Err(Box::new(e));
+                                break 'exiting Err(Box::new(e));
                             }
 
                             if buffer == self.test_definition.test_id {
                                 log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
 
+                                poll2.registry().deregister(&mut stream)?;
+
                                 // NOTE: features unsupported on Windows
-                                #[cfg(not(windows))]
+                                #[cfg(unix)]
                                 if self.receive_buffer != 0 {
                                     log::debug!("setting receive-buffer to {}...", self.receive_buffer);
 
@@ -304,16 +307,18 @@ pub mod receiver {
                                 self.mio_poll
                                     .registry()
                                     .register(&mut stream, self.mio_poll_token, Interest::READABLE)?;
-                                return Ok(stream);
+                                break 'exiting Ok(stream);
                             }
                         }
                         log::warn!("could not validate TCP stream {} connection from {}", self.stream_idx, address);
                     }
                 }
-            }
-            Err(Box::new(simple_error::simple_error!("did not receive a connection")))
+            };
+            poll.registry().deregister(listener)?;
+            result
         }
     }
+
     impl super::TestStream for TcpReceiver {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let mut bytes_received: u64 = 0;
@@ -522,7 +527,7 @@ pub mod sender {
             };
 
             // NOTE: features unsupported on Windows
-            #[cfg(not(windows))]
+            #[cfg(unix)]
             if self.send_buffer != 0 {
                 log::debug!("setting send-buffer to {}...", self.send_buffer);
                 super::setsockopt(&raw_stream, super::SndBuf, &self.send_buffer)?;

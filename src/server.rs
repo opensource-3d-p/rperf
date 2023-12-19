@@ -27,7 +27,7 @@ use std::thread;
 use std::time::Duration;
 
 use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Interest, Poll, Token};
+use mio::{Events, Interest, Poll};
 
 use crate::args::Args;
 use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
@@ -328,7 +328,7 @@ pub fn serve(args: &Args) -> BoxResult<()> {
         TcpListener::bind(SocketAddr::new(args.bind, port)).unwrap_or_else(|_| panic!("failed to bind TCP socket, port {}", port));
     log::info!("server listening on {}", listener.local_addr()?);
 
-    let mio_token = Token(0);
+    let mio_token = crate::get_global_token();
     let mut poll = Poll::new()?;
     poll.registry().register(&mut listener, mio_token, Interest::READABLE)?;
     let mut events = Events::with_capacity(32);
@@ -336,7 +336,7 @@ pub fn serve(args: &Args) -> BoxResult<()> {
     while is_alive() {
         if let Err(err) = poll.poll(&mut events, Some(POLL_TIMEOUT)) {
             if err.kind() == std::io::ErrorKind::Interrupted {
-                log::debug!("Poll interrupted: \"{err}\", ignored, continue polling");
+                log::debug!("Poll interrupted: \"{err}\"");
                 continue;
             }
             log::error!("Poll error: {}", err);

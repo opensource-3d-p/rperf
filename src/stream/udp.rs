@@ -227,12 +227,11 @@ pub mod receiver {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip).expect("failed to bind UDP socket");
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
-            if !cfg!(windows) {
-                //NOTE: features unsupported on Windows
-                if *receive_buffer != 0 {
-                    log::debug!("setting receive-buffer to {}...", receive_buffer);
-                    super::setsockopt(&socket, super::RcvBuf, receive_buffer)?;
-                }
+            // NOTE: features unsupported on Windows
+            #[cfg(unix)]
+            if *receive_buffer != 0 {
+                log::debug!("setting receive-buffer to {}...", receive_buffer);
+                super::setsockopt(&socket, super::RcvBuf, receive_buffer)?;
             }
             log::debug!("bound UDP receive socket for stream {}: {}", stream_idx, socket.local_addr()?);
 
@@ -535,12 +534,11 @@ pub mod sender {
                     .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port)),
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
-            if !cfg!(windows) {
-                //NOTE: features unsupported on Windows
-                if *send_buffer != 0 {
-                    log::debug!("setting send-buffer to {}...", send_buffer);
-                    super::setsockopt(&socket, super::SndBuf, send_buffer)?;
-                }
+            // NOTE: features unsupported on Windows
+            #[cfg(unix)]
+            if *send_buffer != 0 {
+                log::debug!("setting send-buffer to {}...", send_buffer);
+                super::setsockopt(&socket, super::SndBuf, send_buffer)?;
             }
             socket.connect(socket_addr_receiver)?;
             log::debug!("connected UDP stream {} to {}", stream_idx, socket_addr_receiver);
