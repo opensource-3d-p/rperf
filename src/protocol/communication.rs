@@ -42,10 +42,10 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
     let serialised_message = serde_json::to_vec(message)?;
 
     log::debug!(
-        "sending message of length {}, {:?}, to {}...",
+        "sending message to {}, length {}, {:?}...",
+        stream.peer_addr()?,
         serialised_message.len(),
         message,
-        stream.peer_addr()?
     );
     let mut output_buffer = vec![0_u8; serialised_message.len() + 2];
     output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
@@ -71,21 +71,19 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
             }
         }
     }
-    Err(Box::new(simple_error::simple_error!(
-        "timed out while attempting to send status-message to {}",
-        stream.peer_addr()?
-    )))
+    let err = simple_error::simple_error!("timed out while attempting to send status-message to {}", stream.peer_addr()?);
+    Err(Box::new(err))
 }
 
 /// receives the length-count of a pending message over a client-server communications stream
-fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, results_handler: &mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
+fn receive_length(stream: &mut TcpStream, alive_check: fn() -> bool, handler: &mut dyn FnMut() -> BoxResult<()>) -> BoxResult<u16> {
     stream.set_read_timeout(Some(POLL_TIMEOUT)).expect("unable to set TCP read-timeout");
 
     let mut length_bytes_read = 0;
     let mut length_spec: [u8; 2] = [0; 2];
     while alive_check() {
         //waiting to find out how long the next message is
-        results_handler()?; //send any outstanding results between cycles
+        handler()?; //send any outstanding results between cycles
 
         let size = match stream.read(&mut length_spec[length_bytes_read..]) {
             Ok(size) => size,
@@ -156,7 +154,7 @@ fn receive_payload(
         if bytes_read == length as usize {
             match serde_json::from_slice(&buffer) {
                 Ok(v) => {
-                    log::debug!("received {:?} from {}", v, stream.peer_addr()?);
+                    log::debug!("received message from {}: {:?}", stream.peer_addr()?, v);
                     return Ok(v);
                 }
                 Err(e) => {

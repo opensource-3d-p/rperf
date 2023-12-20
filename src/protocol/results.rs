@@ -58,7 +58,7 @@ pub trait IntervalResult {
     fn to_string(&self, bit: bool) -> String;
 }
 
-pub type IntervalResultBox = Box<dyn IntervalResult + Sync + Send>;
+pub type IntervalResultBox = Box<dyn IntervalResult + Sync + Send + 'static>;
 
 pub struct ClientDoneResult {
     pub stream_idx: u8,
@@ -477,7 +477,7 @@ impl IntervalResult for UdpSendResult {
     }
 }
 
-pub fn interval_result_from_json(value: serde_json::Value) -> BoxResult<Box<dyn IntervalResult>> {
+pub fn interval_result_from_json(value: serde_json::Value) -> BoxResult<IntervalResultBox> {
     match value.get("family") {
         Some(f) => match f.as_str() {
             Some(family) => match family {

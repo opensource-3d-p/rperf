@@ -18,10 +18,9 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::results::{get_unix_timestamp, IntervalResult, TcpReceiveResult, TcpSendResult};
+use crate::protocol::results::{get_unix_timestamp, TcpReceiveResult, TcpSendResult};
+use crate::stream::{parse_port_spec, TestStream, INTERVAL};
 use crate::BoxResult;
-
-use super::{parse_port_spec, TestStream, INTERVAL};
 
 pub const TEST_HEADER_SIZE: usize = 16;
 
@@ -38,7 +37,7 @@ pub struct TcpTestDefinition {
     pub length: usize,
 }
 impl TcpTestDefinition {
-    pub fn new(details: &serde_json::Value) -> super::BoxResult<TcpTestDefinition> {
+    pub fn new(details: &serde_json::Value) -> BoxResult<TcpTestDefinition> {
         let mut test_id_bytes = [0_u8; 16];
         for (i, v) in details
             .get("test_id")
@@ -76,13 +75,14 @@ impl TcpTestDefinition {
 }
 
 pub mod receiver {
+    use mio::net::{TcpListener, TcpStream};
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    use mio::net::{TcpListener, TcpStream};
+    use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const POLL_TIMEOUT: Duration = Duration::from_millis(250);
     const CONNECTION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -97,7 +97,7 @@ pub mod receiver {
         lock_ip6: Mutex<u8>,
     }
     impl TcpPortPool {
-        pub fn new(port_spec: String, port_spec6: String) -> TcpPortPool {
+        pub fn new(port_spec: &str, port_spec6: &str) -> TcpPortPool {
             let ports = super::parse_port_spec(port_spec);
             if !ports.is_empty() {
                 log::debug!("configured IPv4 TCP port pool: {:?}", ports);
@@ -123,7 +123,7 @@ pub mod receiver {
             }
         }
 
-        pub fn bind(&mut self, peer_ip: &IpAddr) -> super::BoxResult<TcpListener> {
+        pub fn bind(&mut self, peer_ip: &IpAddr) -> BoxResult<TcpListener> {
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
@@ -193,7 +193,6 @@ pub mod receiver {
         }
     }
 
-    #[allow(dead_code)]
     pub struct TcpReceiver {
         active: AtomicBool,
         test_definition: super::TcpTestDefinition,
@@ -213,7 +212,7 @@ pub mod receiver {
             stream_idx: &u8,
             port_pool: &mut TcpPortPool,
             peer_ip: &IpAddr,
-        ) -> super::BoxResult<TcpReceiver> {
+        ) -> BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
             let mut listener: TcpListener = port_pool.bind(peer_ip).expect("failed to bind TCP socket");
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
@@ -238,7 +237,7 @@ pub mod receiver {
             })
         }
 
-        fn process_connection(&mut self) -> super::BoxResult<(TcpStream, u64, f32)> {
+        fn process_connection(&mut self) -> BoxResult<(TcpStream, u64, f32)> {
             log::debug!("preparing to receive TCP stream {} connection...", self.stream_idx);
 
             let listener = self.listener.as_mut().unwrap();
@@ -357,7 +356,7 @@ pub mod receiver {
     }
 
     impl super::TestStream for TcpReceiver {
-        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let mut bytes_received: u64 = 0;
 
             let mut additional_time_elapsed: f32 = 0.0;
@@ -450,7 +449,7 @@ pub mod receiver {
             }
         }
 
-        fn get_port(&self) -> super::BoxResult<u16> {
+        fn get_port(&self) -> BoxResult<u16> {
             match &self.listener {
                 Some(listener) => Ok(listener.local_addr()?.port()),
                 None => match &self.stream {
@@ -475,6 +474,8 @@ pub mod sender {
     use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
+
+    use crate::{protocol::results::IntervalResultBox, BoxResult};
 
     const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
     const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
@@ -509,7 +510,7 @@ pub mod sender {
             send_interval: &f32,
             send_buffer: &usize,
             no_delay: &bool,
-        ) -> super::BoxResult<TcpSender> {
+        ) -> BoxResult<TcpSender> {
             let mut staged_buffer = vec![0_u8; test_definition.length];
             for (i, staged_buffer_i) in staged_buffer.iter_mut().enumerate().skip(super::TEST_HEADER_SIZE) {
                 //fill the packet with a fixed sequence
@@ -536,8 +537,8 @@ pub mod sender {
             })
         }
 
-        fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
-            log::debug!("preparing to connect TCP stream {}...", self.stream_idx);
+        fn process_connection(&mut self) -> BoxResult<TcpStream> {
+            log::debug!("preparing to connect TCP stream {} to {} ...", self.stream_idx, self.socket_addr);
 
             let stream = match TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
                 Ok(s) => s,
@@ -575,7 +576,7 @@ pub mod sender {
         }
     }
     impl super::TestStream for TcpSender {
-        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             if self.stream.is_none() {
                 //if still in the setup phase, connect to the receiver
                 match self.process_connection() {
@@ -704,7 +705,7 @@ pub mod sender {
             }
         }
 
-        fn get_port(&self) -> super::BoxResult<u16> {
+        fn get_port(&self) -> BoxResult<u16> {
             match &self.stream {
                 Some(stream) => Ok(stream.local_addr()?.port()),
                 None => Err(Box::new(simple_error::simple_error!("no stream currently exists"))),

@@ -21,8 +21,7 @@
 use std::io;
 use std::net::{Shutdown, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -31,7 +30,7 @@ use std::net::{TcpListener, TcpStream};
 use crate::args::Args;
 use crate::protocol::communication::{receive, send};
 use crate::protocol::messaging::{prepare_connect, prepare_connect_ready};
-use crate::protocol::results::ServerDoneResult;
+use crate::protocol::results::{IntervalResultBox, ServerDoneResult};
 use crate::stream::{tcp, udp, TestStream};
 use crate::BoxResult;
 
@@ -56,10 +55,7 @@ fn handle_client(
     let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
 
-    let (results_tx, results_rx): (
-        std::sync::mpsc::Sender<crate::protocol::results::IntervalResultBox>,
-        std::sync::mpsc::Receiver<crate::protocol::results::IntervalResultBox>,
-    ) = channel();
+    let (results_tx, results_rx) = mpsc::channel::<IntervalResultBox>();
 
     //a closure used to pass results from stream-handlers to the client-communication stream
     let mut forwarding_send_stream = stream.try_clone()?;
@@ -295,12 +291,12 @@ impl Drop for ClientThreadMonitor {
 pub fn serve(args: &Args) -> BoxResult<()> {
     //config-parsing and pre-connection setup
     let tcp_port_pool = Arc::new(Mutex::new(tcp::receiver::TcpPortPool::new(
-        args.tcp_port_pool.to_string(),
-        args.tcp6_port_pool.to_string(),
+        &args.tcp_port_pool,
+        &args.tcp6_port_pool,
     )));
     let udp_port_pool = Arc::new(Mutex::new(udp::receiver::UdpPortPool::new(
-        args.udp_port_pool.to_string(),
-        args.udp6_port_pool.to_string(),
+        &args.udp_port_pool,
+        &args.udp6_port_pool,
     )));
 
     let cpu_affinity_manager = Arc::new(Mutex::new(crate::utils::cpu_affinity::CpuAffinityManager::new(&args.affinity)?));
@@ -317,53 +313,54 @@ pub fn serve(args: &Args) -> BoxResult<()> {
     log::info!("server listening on {}", listener.local_addr()?);
 
     while is_alive() {
-        match listener.accept() {
-            Ok((mut stream, address)) => {
-                log::info!("connection from {}", address);
-
-                stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-
-                #[cfg(unix)]
-                {
-                    use crate::protocol::communication::KEEPALIVE_DURATION;
-                    let keepalive_parameters = socket2::TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
-                    let raw_socket = socket2::SockRef::from(&stream);
-                    raw_socket.set_tcp_keepalive(&keepalive_parameters)?;
-                }
-
-                let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
-                if client_limit > 0 && client_count > client_limit {
-                    log::warn!("client-limit ({}) reached; disconnecting {}...", client_limit, address.to_string());
-                    stream.shutdown(Shutdown::Both).unwrap_or_default();
-                    CLIENTS.fetch_sub(1, Ordering::Relaxed);
-                } else {
-                    let c_cam = cpu_affinity_manager.clone();
-                    let c_tcp_port_pool = tcp_port_pool.clone();
-                    let c_udp_port_pool = udp_port_pool.clone();
-                    let thread_builder = thread::Builder::new().name(address.to_string());
-                    thread_builder.spawn(move || {
-                        //ensure the client is accounted-for even if the handler panics
-                        let _client_thread_monitor = ClientThreadMonitor {
-                            client_address: address.to_string(),
-                        };
-
-                        match handle_client(&mut stream, c_cam, c_tcp_port_pool, c_udp_port_pool) {
-                            Ok(_) => (),
-                            Err(e) => log::error!("error in client-handler: {}", e),
-                        }
-
-                        //in the event of panic, this will happen when the stream is dropped
-                        stream.shutdown(Shutdown::Both).unwrap_or_default();
-                    })?;
-                }
-            }
+        let (mut stream, address) = match listener.accept() {
+            Ok((stream, address)) => (stream, address),
             Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                //no pending clients
+                // no pending clients
                 thread::sleep(POLL_TIMEOUT);
+                continue;
             }
             Err(e) => {
                 return Err(Box::new(e));
             }
+        };
+
+        log::info!("connection from {}", address);
+
+        stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
+
+        #[cfg(unix)]
+        {
+            use crate::protocol::communication::KEEPALIVE_DURATION;
+            let keepalive_parameters = socket2::TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+            let raw_socket = socket2::SockRef::from(&stream);
+            raw_socket.set_tcp_keepalive(&keepalive_parameters)?;
+        }
+
+        let client_count = CLIENTS.fetch_add(1, Ordering::Relaxed) + 1;
+        if client_limit > 0 && client_count > client_limit {
+            log::warn!("client-limit ({}) reached; disconnecting {}...", client_limit, address.to_string());
+            stream.shutdown(Shutdown::Both).unwrap_or_default();
+            CLIENTS.fetch_sub(1, Ordering::Relaxed);
+        } else {
+            let c_cam = cpu_affinity_manager.clone();
+            let c_tcp_port_pool = tcp_port_pool.clone();
+            let c_udp_port_pool = udp_port_pool.clone();
+            let thread_builder = thread::Builder::new().name(address.to_string());
+            thread_builder.spawn(move || {
+                // ensure the client is accounted-for even if the handler panics
+                let _client_thread_monitor = ClientThreadMonitor {
+                    client_address: address.to_string(),
+                };
+
+                match handle_client(&mut stream, c_cam, c_tcp_port_pool, c_udp_port_pool) {
+                    Ok(_) => (),
+                    Err(e) => log::error!("error in client-handler: {}", e),
+                }
+
+                //in the event of panic, this will happen when the stream is dropped
+                stream.shutdown(Shutdown::Both).unwrap_or_default();
+            })?;
         }
     }
 

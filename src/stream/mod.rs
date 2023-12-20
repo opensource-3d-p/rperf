@@ -21,7 +21,7 @@
 pub mod tcp;
 pub mod udp;
 
-use crate::BoxResult;
+use crate::{protocol::results::IntervalResultBox, BoxResult};
 
 pub const INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -30,7 +30,7 @@ pub const INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 /// INTERVAL while gathering data.
 pub trait TestStream {
     /// gather data; returns None when the test is over
-    fn run_interval(&mut self) -> Option<BoxResult<crate::protocol::results::IntervalResultBox>>;
+    fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>>;
     /// return the port associated with the test-stream; this may vary over the test's lifetime
     fn get_port(&self) -> BoxResult<u16>;
     /// returns the index of the test, used to match client and server data
@@ -39,7 +39,7 @@ pub trait TestStream {
     fn stop(&mut self);
 }
 
-fn parse_port_spec(port_spec: String) -> Vec<u16> {
+fn parse_port_spec(port_spec: &str) -> Vec<u16> {
     let mut ports = Vec::<u16>::new();
     if !port_spec.is_empty() {
         for range in port_spec.split(',') {

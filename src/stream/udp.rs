@@ -18,8 +18,10 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use crate::protocol::results::{get_unix_timestamp, IntervalResult, UdpReceiveResult, UdpSendResult};
-use crate::BoxResult;
+use crate::{
+    protocol::results::{get_unix_timestamp, UdpReceiveResult, UdpSendResult},
+    BoxResult,
+};
 
 use super::{parse_port_spec, TestStream, INTERVAL};
 
@@ -36,7 +38,7 @@ pub struct UdpTestDefinition {
     pub length: u16,
 }
 impl UdpTestDefinition {
-    pub fn new(details: &serde_json::Value) -> super::BoxResult<UdpTestDefinition> {
+    pub fn new(details: &serde_json::Value) -> BoxResult<UdpTestDefinition> {
         let mut test_id_bytes = [0_u8; 16];
         for (i, v) in details
             .get("test_id")
@@ -74,6 +76,8 @@ impl UdpTestDefinition {
 }
 
 pub mod receiver {
+    use crate::protocol::results::IntervalResultBox;
+    use crate::BoxResult;
     use chrono::NaiveDateTime;
     use std::convert::TryInto;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -92,7 +96,7 @@ pub mod receiver {
         lock_ip6: Mutex<u8>,
     }
     impl UdpPortPool {
-        pub fn new(port_spec: String, port_spec6: String) -> UdpPortPool {
+        pub fn new(port_spec: &str, port_spec6: &str) -> UdpPortPool {
             let ports = super::parse_port_spec(port_spec);
             if !ports.is_empty() {
                 log::debug!("configured IPv4 UDP port pool: {:?}", ports);
@@ -118,7 +122,7 @@ pub mod receiver {
             }
         }
 
-        pub fn bind(&mut self, peer_ip: &IpAddr) -> super::BoxResult<UdpSocket> {
+        pub fn bind(&mut self, peer_ip: &IpAddr) -> BoxResult<UdpSocket> {
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
@@ -218,7 +222,7 @@ pub mod receiver {
             port_pool: &mut UdpPortPool,
             peer_ip: &IpAddr,
             receive_buffer: &usize,
-        ) -> super::BoxResult<UdpReceiver> {
+        ) -> BoxResult<UdpReceiver> {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool.bind(peer_ip).expect("failed to bind UDP socket");
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
@@ -352,7 +356,7 @@ pub mod receiver {
         }
     }
     impl super::TestStream for UdpReceiver {
-        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let mut buf = vec![0_u8; self.test_definition.length.into()];
 
             let mut bytes_received: u64 = 0;
@@ -448,7 +452,7 @@ pub mod receiver {
             }
         }
 
-        fn get_port(&self) -> super::BoxResult<u16> {
+        fn get_port(&self) -> BoxResult<u16> {
             let socket_addr = self.socket.local_addr()?;
             Ok(socket_addr.port())
         }
@@ -464,12 +468,12 @@ pub mod receiver {
 }
 
 pub mod sender {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
+    use crate::protocol::results::IntervalResultBox;
+    use crate::BoxResult;
     use std::net::UdpSocket;
-
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::thread::sleep;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     const WRITE_TIMEOUT: Duration = Duration::from_millis(50);
     const BUFFER_FULL_TIMEOUT: Duration = Duration::from_millis(1);
@@ -499,7 +503,7 @@ pub mod sender {
             send_duration: &f32,
             send_interval: &f32,
             send_buffer: &usize,
-        ) -> super::BoxResult<UdpSender> {
+        ) -> BoxResult<UdpSender> {
             log::debug!("preparing to connect UDP stream {}...", stream_idx);
             let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
             let socket = match receiver_ip {
@@ -554,7 +558,7 @@ pub mod sender {
         }
     }
     impl super::TestStream for UdpSender {
-        fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
+        fn run_interval(&mut self) -> Option<BoxResult<IntervalResultBox>> {
             let interval_duration = Duration::from_secs_f32(self.send_interval);
             let mut interval_iteration = 0;
             let bytes_to_send = ((self.test_definition.bandwidth as f32) * super::INTERVAL.as_secs_f32()) as i64;
@@ -681,7 +685,7 @@ pub mod sender {
             }
         }
 
-        fn get_port(&self) -> super::BoxResult<u16> {
+        fn get_port(&self) -> BoxResult<u16> {
             let socket_addr = self.socket.local_addr()?;
             Ok(socket_addr.port())
         }
