@@ -92,12 +92,12 @@ pub struct Args {
 
     /// send buffer, in bytes (only supported on some platforms;
     /// if set too small, a 'resource unavailable' error may occur;
-    /// affects TCP window-size)
+    /// affects UDP and TCP window-size)
     #[arg(long, default_value = "0", value_name = "bytes", conflicts_with = "server")]
     pub send_buffer: usize,
 
     /// receive buffer, in bytes (only supported on some platforms;
-    /// if set too small, a 'resource unavailable' error may occur; affects TCP window-size)
+    /// if set too small, a 'resource unavailable' error may occur; affects UDP)
     #[arg(long, default_value = "0", value_name = "bytes", conflicts_with = "server")]
     pub receive_buffer: usize,
 

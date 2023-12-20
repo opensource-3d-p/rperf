@@ -21,7 +21,7 @@
 use crate::{
     args,
     protocol::{
-        communication::{receive, send, KEEPALIVE_DURATION},
+        communication::{receive, send},
         messaging::{prepare_begin, prepare_download_configuration, prepare_end, prepare_upload_configuration},
         results::{ClientDoneResult, ClientFailedResult},
         results::{IntervalResultBox, IntervalResultKind, TcpTestResults, TestResults, UdpTestResults},
@@ -29,9 +29,8 @@ use crate::{
     stream::{tcp, udp, TestStream},
     BoxResult,
 };
-use mio::net::TcpStream;
 use std::{
-    net::{IpAddr, Shutdown, ToSocketAddrs},
+    net::{IpAddr, Shutdown, TcpStream, ToSocketAddrs},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::channel,
@@ -63,23 +62,16 @@ fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
     };
 
-    let stream = {
-        let socket: socket2::Socket = socket2::Socket::from(stream);
-        let keepalive = socket2::TcpKeepalive::new()
-            .with_time(KEEPALIVE_DURATION)
-            .with_interval(KEEPALIVE_DURATION);
-        cfg_if::cfg_if! {
-            if #[cfg(unix)] {
-                let keepalive = keepalive.with_retries(4);
-            }
-        }
-        socket.set_tcp_keepalive(&keepalive)?;
-        socket.set_nodelay(true)?;
+    log::debug!("connected TCP control-channel to {}", destination);
+    stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
 
-        let stream: std::net::TcpStream = socket.into();
-
-        TcpStream::from_std(stream)
-    };
+    #[cfg(unix)]
+    {
+        use crate::protocol::communication::KEEPALIVE_DURATION;
+        let keepalive_parameters = socket2::TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+        let raw_socket = socket2::SockRef::from(&stream);
+        raw_socket.set_tcp_keepalive(&keepalive_parameters)?;
+    }
 
     log::info!("connected to server");
 
@@ -222,13 +214,8 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
             let test_definition = tcp::TcpTestDefinition::new(&download_config)?;
             for stream_idx in 0..stream_count {
                 log::debug!("preparing TCP-receiver for stream {}...", stream_idx);
-                let test = tcp::receiver::TcpReceiver::new(
-                    test_definition.clone(),
-                    &(stream_idx as u8),
-                    &mut tcp_port_pool,
-                    &server_addr.ip(),
-                    &(download_config["receive_buffer"].as_i64().unwrap() as usize),
-                )?;
+                let test =
+                    tcp::receiver::TcpReceiver::new(test_definition.clone(), &(stream_idx as u8), &mut tcp_port_pool, &server_addr.ip())?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
             }
