@@ -346,10 +346,10 @@ pub fn serve(args: &Args) -> BoxResult<()> {
     while is_alive() {
         if let Err(err) = poll.poll(&mut events, Some(POLL_TIMEOUT)) {
             if err.kind() == std::io::ErrorKind::Interrupted {
-                log::debug!("Poll interrupted: \"{err}\"");
+                log::debug!("poll interrupted, \"{err}\" ignored; resuming poll");
                 continue;
             }
-            log::error!("Poll error: {}", err);
+            log::error!("poll error: {}", err);
             break;
         }
         for event in events.iter() {

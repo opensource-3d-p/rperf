@@ -44,7 +44,10 @@ fn main() -> BoxResult<()> {
         })?;
 
         log::debug!("beginning normal operation...");
-        server::serve(&args)?;
+        if let Err(err) = server::serve(&args) {
+            log::error!("unable to run server: {}", err);
+            std::process::exit(4);
+        }
         exiting.join().expect("unable to join SIGINT handler thread");
     } else if args.client.is_some() {
         log::debug!("registering SIGINT handler...");
@@ -59,11 +62,15 @@ fn main() -> BoxResult<()> {
         })?;
 
         log::debug!("connecting to server...");
-        client::execute(&args)?;
+        if let Err(err) = client::execute(&args) {
+            log::error!("unable to run client: {}", err);
+            std::process::exit(4);
+        }
     } else {
         use clap::CommandFactory;
         let mut cmd = args::Args::command();
         cmd.print_help().unwrap();
+        std::process::exit(2);
     }
     Ok(())
 }
