@@ -129,7 +129,7 @@ pub fn execute(args: &args::Args) -> BoxResult<()> {
     let mut download_config = prepare_download_configuration(args, test_id.as_bytes())?;
 
     //connect to the server
-    let mut stream = connect_to_server(&args.client.unwrap().to_string(), &args.port)?;
+    let mut stream = connect_to_server(args.client.as_ref().unwrap(), &args.port)?;
     let server_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this test

@@ -43,7 +43,7 @@ pub struct Args {
 
     /// run in client mode; value is the server's address
     #[arg(short, long, value_name = "host", conflicts_with = "server")]
-    pub client: Option<std::net::IpAddr>,
+    pub client: Option<String>,
 
     /// run in reverse-mode (server sends, client receives)
     #[arg(short = 'R', long, conflicts_with = "server")]
@@ -109,7 +109,7 @@ pub struct Args {
     /// primarily to avoid including TCP ramp-up in averages;
     /// using this option may result in disagreement between bytes sent and received,
     /// since data can be in-flight across time-boundaries
-    #[arg(short, long, default_value = "0", value_name = "seconds", conflicts_with = "server")]
+    #[arg(short = 'O', long, default_value = "0", value_name = "seconds", conflicts_with = "server")]
     pub omit: usize,
 
     /// use no-delay mode for TCP tests, disabling Nagle's Algorithm
