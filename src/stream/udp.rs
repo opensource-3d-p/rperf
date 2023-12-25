@@ -379,51 +379,50 @@ pub mod receiver {
 
             while self.active && start.elapsed() < super::INTERVAL {
                 log::trace!("awaiting UDP packets on stream {}...", self.stream_idx);
-                loop {
-                    let (packet_size, peer_addr) = match self.socket.recv_from(&mut buf) {
-                        Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                            // receive timeout
-                            break;
-                        }
-                        Err(e) => {
-                            return Some(Err(Box::new(e)));
-                        }
-                    };
+                let (packet_size, peer_addr) = match self.socket.recv_from(&mut buf) {
+                    Ok((packet_size, peer_addr)) => (packet_size, peer_addr),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
+                        // receive timeout
+                        continue;
+                    }
+                    Err(e) => {
+                        return Some(Err(Box::new(e)));
+                    }
+                };
 
-                    log::trace!(
-                        "received {} bytes in UDP packet {} from {}",
+                log::trace!(
+                    "received {} bytes in UDP packet {} from {}",
+                    packet_size,
+                    self.stream_idx,
+                    peer_addr
+                );
+                if packet_size == 16 {
+                    // possible end-of-test message
+                    if buf[0..16] == self.test_definition.test_id {
+                        // test's over
+                        self.stop();
+                        break;
+                    }
+                }
+                if packet_size < super::TEST_HEADER_SIZE as usize {
+                    log::warn!(
+                        "received malformed packet with size {} for UDP stream {} from {}",
                         packet_size,
                         self.stream_idx,
                         peer_addr
                     );
-                    if packet_size == 16 {
-                        // possible end-of-test message
-                        if buf[0..16] == self.test_definition.test_id {
-                            // test's over
-                            self.stop();
-                            break;
-                        }
-                    }
-                    if packet_size < super::TEST_HEADER_SIZE as usize {
-                        log::warn!(
-                            "received malformed packet with size {} for UDP stream {} from {}",
-                            packet_size,
-                            self.stream_idx,
-                            peer_addr
-                        );
-                        continue;
-                    }
+                    continue;
+                }
 
-                    if self.process_packet(&buf, &mut history) {
-                        // NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
-                        bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
-                    } else {
-                        log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
-                        continue;
-                    }
+                if self.process_packet(&buf, &mut history) {
+                    // NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
+                    bytes_received += packet_size as u64 + super::UDP_HEADER_SIZE as u64;
+                } else {
+                    log::warn!("received packet unrelated to UDP stream {} from {}", self.stream_idx, peer_addr);
+                    continue;
                 }
             }
+
             if bytes_received > 0 {
                 log::debug!(
                     "{} bytes received via UDP stream {} in this interval; reporting...",
