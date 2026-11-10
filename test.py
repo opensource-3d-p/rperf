@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Copyright (C) 2021 Evtech Solutions, Ltd., dba 3D-P
-Copyright (C) 2021 Neil Tallim <neiltallim@3d-p.com>
+Copyright (C) 2026 Evtech Solutions, Ltd., dba 3D-P
+Copyright (C) 2026 Neil Tallim <neiltallim@3d-p.com>
 
 This file is part of rperf.
 
@@ -26,14 +26,35 @@ and it isn't concerned with probing limits. It just makes sure TCP, UDP, and
 common options are functioning as expected.
 """
 
-import argparse
 import concurrent.futures
 import json
+import socket
 import subprocess
+import time
 import unittest
 
 _RPERF_BINARY = "./target/release/rperf"
 _DISPLAY_LOGS = False #whether to display rperf's logs on stderr while testing
+_SERVER_PORT = 5199 #must match rperf's default --port
+
+def _wait_for_server_ready(probe_addresses, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        for (host, port) in probe_addresses:
+            family = socket.AF_INET6 if ':' in host else socket.AF_INET
+            probe = socket.socket(family, socket.SOCK_STREAM)
+            probe.settimeout(0.25)
+            try:
+                probe.connect((host, port))
+                return True
+            except OSError as e:
+                last_error = e
+            finally:
+                probe.close()
+        time.sleep(0.05)
+    raise RuntimeError("server did not become ready on {} within {:.1f}s (last error: {})".format(
+        probe_addresses, timeout, last_error))
 
 def _run_rperf_client(address, args):
     full_args = [_RPERF_BINARY, '-c', address, '-f', 'json',]
@@ -43,13 +64,13 @@ def _run_rperf_client(address, args):
     else:
         result = subprocess.check_output(full_args, stderr=subprocess.DEVNULL)
     return json.loads(result)
-    
+
 def _run_rperf_client_hostname(args):
     return _run_rperf_client('localhost', args)
-    
+
 def _run_rperf_client_ipv4(args):
     return _run_rperf_client('127.0.0.1', args)
-    
+
 def _run_rperf_client_ipv6(args):
     return _run_rperf_client('::1', args)
 
@@ -62,11 +83,12 @@ class TestIpv4(unittest.TestCase):
             self.server = subprocess.Popen((_RPERF_BINARY, '-s',))
         else:
             self.server = subprocess.Popen((_RPERF_BINARY, '-s',), stderr=subprocess.DEVNULL)
-            
+        _wait_for_server_ready((('127.0.0.1', _SERVER_PORT),))
+
     def tearDown(self):
         self.server.terminate()
         self.server.wait()
-        
+
     def test_tcp_forward(self):
         result = _run_rperf_client_ipv4((
             '-b', '500000', #keep it light, at 500kBps per stream
@@ -82,7 +104,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
-        
+
     def test_tcp_reverse(self):
         result = _run_rperf_client_ipv4((
             '-R', #run in reverse mode
@@ -99,7 +121,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
-        
+
     def test_udp_forward(self):
         result = _run_rperf_client_ipv4((
             '-u', #run UDP test
@@ -121,7 +143,7 @@ class TestIpv4(unittest.TestCase):
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
         self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 4.0, delta=0.1)
-        
+
     def test_udp_reverse(self):
         result = _run_rperf_client_ipv4((
             '-u', #run UDP test
@@ -154,11 +176,12 @@ class TestIpv6(unittest.TestCase):
             self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6',))
         else:
             self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6'), stderr=subprocess.DEVNULL)
-            
+        _wait_for_server_ready((('::1', _SERVER_PORT), ('127.0.0.1', _SERVER_PORT)))
+
     def tearDown(self):
         self.server.terminate()
         self.server.wait()
-        
+
     def test_tcp_forward(self):
         result = _run_rperf_client_ipv6((
             '-b', '500000', #keep it light, at 500kBps per stream
@@ -173,7 +196,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
-        
+
     def test_tcp_reverse(self):
         result = _run_rperf_client_ipv6((
             '-R', #run in reverse mode
@@ -189,7 +212,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 2.0, delta=0.1)
-        
+
     def test_udp_forward(self):
         result = _run_rperf_client_ipv6((
             '-u', #run UDP test
@@ -210,7 +233,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
         self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
-        
+
     def test_udp_reverse(self):
         result = _run_rperf_client_ipv6((
             '-u', #run UDP test
@@ -232,7 +255,7 @@ class TestIpv6(unittest.TestCase):
         self.assertEqual(result['summary']['packets_out_of_order'], 0)
         self.assertAlmostEqual(result['summary']['bytes_received'], 500000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 1.0, delta=0.1)
-        
+
 
 
 
@@ -242,11 +265,12 @@ class TestMisc(unittest.TestCase):
             self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6', '-A', '0,1'))
         else:
             self.server = subprocess.Popen((_RPERF_BINARY, '-s', '-6', '-A', '0,1'), stderr=subprocess.DEVNULL)
-            
+        _wait_for_server_ready((('::1', _SERVER_PORT), ('127.0.0.1', _SERVER_PORT)))
+
     def tearDown(self):
         self.server.terminate()
         self.server.wait()
-        
+
     def test_hostname(self):
         result = _run_rperf_client_hostname((
             '-N', #disable Nagle's algorithm
@@ -261,7 +285,7 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 1.75, delta=0.5)
-        
+
     def test_hostname_reverse(self):
         result = _run_rperf_client_hostname((
             '-N', #disable Nagle's algorithm
@@ -277,7 +301,7 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 1000000, delta=25000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 1.75, delta=0.5)
-        
+
     def test_ipv4_mapped_with_core_affinity(self):
         result = _run_rperf_client_ipv4((
             '-A', '2,3', #set CPU core-affinity to 2 and 3
@@ -294,7 +318,7 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(result['summary']['bytes_received'], result['summary']['bytes_sent'])
         self.assertAlmostEqual(result['summary']['bytes_received'], 2000000, delta=50000)
         self.assertAlmostEqual(result['summary']['duration_receive'], 3.5, delta=1.0)
-        
+
     def test_multiple_simultaneous_clients(self):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             tcp_1_ipv4 = executor.submit(_run_rperf_client_ipv4, (
@@ -321,7 +345,7 @@ class TestMisc(unittest.TestCase):
                 '-l', '1200', #try to send 1200 bytes of data at a time
                 '-t', '2', #run for two seconds
             ))
-            
+
             self.assertTrue(tcp_1_ipv4.result()['success'])
             self.assertTrue(tcp_2_ipv6_reverse.result()['success'])
             self.assertTrue(udp_1_ipv6.result()['success'])
@@ -332,4 +356,3 @@ class TestMisc(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-    
