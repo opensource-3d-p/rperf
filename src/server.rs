@@ -481,7 +481,7 @@ pub fn serve(args: ArgMatches) -> BoxResult<()> {
     listener
         .set_nonblocking(true)
         .expect("unable to make TCP server non-blocking");
-    log::info!("server listening on {}", listener.local_addr()?);
+    log::info!("TCP control socket listening on {}", listener.local_addr()?);
 
     //bind a UDP "NAT resolution" socket for reverse-NAT-traversal: clients send tracer datagrams  to help detect NATs
     let nat_resolution_port_spec = args.value_of("nat_resolution_port").unwrap();
