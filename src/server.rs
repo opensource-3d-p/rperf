@@ -54,8 +54,8 @@ type BoxResult<T> = Result<T, Box<dyn Error>>;
 type NatPortMap = Arc<Mutex<HashMap<(IpAddr, [u8; 16], u8), u16>>>;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(500);
-const TRACER_WAIT: Duration = Duration::from_millis(3000);
-const TRACER_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const TRACER_WAIT: Duration = Duration::from_millis(750);
+const TRACER_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 /// when false, the system is shutting down
 static ALIVE: AtomicBool = AtomicBool::new(true);
