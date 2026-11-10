@@ -18,10 +18,6 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-extern crate nix;
-
-use nix::sys::socket::{setsockopt, sockopt::RcvBuf, sockopt::SndBuf};
-
 use crate::protocol::results::{IntervalResult, TcpReceiveResult, TcpSendResult, get_unix_timestamp};
 
 use super::{INTERVAL, TestStream, parse_port_spec};
@@ -29,13 +25,19 @@ use super::{INTERVAL, TestStream, parse_port_spec};
 use std::error::Error;
 type BoxResult<T> = Result<T,Box<dyn Error>>;
 
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        use std::time::Duration;
+        const KEEPALIVE_DURATION:Duration = Duration::from_secs(5);
+    }
+}
 pub const TEST_HEADER_SIZE:usize = 16;
 
 #[derive(Clone)]
 pub struct TcpTestDefinition {
     //a UUID used to identify packets associated with this test
     pub test_id: [u8; 16],
-    //bandwidth target, in bytes/sec
+    // //bandwidth target, in bytes/sec
     pub bandwidth: u64,
     //the length of the buffer to exchange
     pub length: usize,
@@ -67,14 +69,13 @@ impl TcpTestDefinition {
 pub mod receiver {
     use std::io::Read;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
     use std::sync::{Mutex};
     use std::time::{Duration, Instant};
     
     use mio::net::{TcpListener, TcpStream};
-    use mio::{Events, Ready, Poll, PollOpt, Token};
     
     const POLL_TIMEOUT:Duration = Duration::from_millis(250);
+    const CONNECTION_TIMEOUT:Duration = Duration::from_secs(1);
     const RECEIVE_TIMEOUT:Duration = Duration::from_secs(3);
     
     pub struct TcpPortPool {
@@ -116,12 +117,12 @@ pub mod receiver {
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
-                        return Ok(TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)).expect(format!("failed to bind OS-assigned IPv6 TCP socket").as_str()));
+                        return Ok(TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 0)).expect(format!("failed to bind OS-assigned IPv6 TCP socket").as_str()));
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
                         
                         for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() { //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
                             if listener_result.is_ok() {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result.unwrap());
@@ -130,7 +131,7 @@ pub mod receiver {
                             }
                         }
                         for port_idx in 0..=self.pos_ip6 { //circle back to where the search started
-                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), self.ports_ip6[port_idx]));
                             if listener_result.is_ok() {
                                 self.pos_ip6 = port_idx;
                                 return Ok(listener_result.unwrap());
@@ -143,12 +144,12 @@ pub mod receiver {
                 },
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
-                        return Ok(TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).expect(format!("failed to bind OS-assigned IPv4 TCP socket").as_str()));
+                        return Ok(TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).expect(format!("failed to bind OS-assigned IPv4 TCP socket").as_str()));
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
                         
                         for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() { //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
                             if listener_result.is_ok() {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result.unwrap());
@@ -157,7 +158,7 @@ pub mod receiver {
                             }
                         }
                         for port_idx in 0..=self.pos_ip4 { //circle back to where the search started
-                            let listener_result = TcpListener::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
+                            let listener_result = TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.ports_ip4[port_idx]));
                             if listener_result.is_ok() {
                                 self.pos_ip4 = port_idx;
                                 return Ok(listener_result.unwrap());
@@ -179,19 +180,23 @@ pub mod receiver {
         
         listener: Option<TcpListener>,
         stream: Option<TcpStream>,
-        mio_poll_token: Token,
-        mio_poll: Poll,
         
-        receive_buffer: usize,
+        mio_events: mio::Events,
+        mio_poll: mio::Poll,
+        mio_token: mio::Token,
     }
     impl TcpReceiver {
-        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port_pool:&mut TcpPortPool, peer_ip:&IpAddr, receive_buffer:&usize) -> super::BoxResult<TcpReceiver> {
+        pub fn new(test_definition:super::TcpTestDefinition, stream_idx:&u8, port_pool:&mut TcpPortPool, peer_ip:&IpAddr) -> super::BoxResult<TcpReceiver> {
             log::debug!("binding TCP listener for stream {}...", stream_idx);
-            let listener:TcpListener = port_pool.bind(peer_ip).expect(format!("failed to bind TCP socket").as_str());
+            let mut listener:TcpListener = port_pool.bind(peer_ip).expect("failed to bind TCP socket");
             log::debug!("bound TCP listener for stream {}: {}", stream_idx, listener.local_addr()?);
             
-            let mio_poll_token = Token(0);
-            let mio_poll = Poll::new()?;
+            let port = listener.local_addr()?.port();
+            
+            let mio_events = mio::Events::with_capacity(1);
+            let mio_poll = mio::Poll::new()?;
+            let mio_token = mio::Token(port as usize);
+            mio_poll.registry().register(&mut listener, mio_token, mio::Interest::READABLE)?;
             
             Ok(TcpReceiver{
                 active: true,
@@ -200,26 +205,18 @@ pub mod receiver {
                 
                 listener: Some(listener),
                 stream: None,
-                mio_poll_token: mio_poll_token,
-                mio_poll: mio_poll,
                 
-                receive_buffer: receive_buffer.to_owned(),
+                mio_events: mio_events,
+                mio_poll: mio_poll,
+                mio_token: mio_token,
             })
         }
         
-        fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
+        fn process_connection(&mut self) -> super::BoxResult<(TcpStream, u64, f32)> {
             log::debug!("preparing to receive TCP stream {} connection...", self.stream_idx);
             
             let listener = self.listener.as_mut().unwrap();
-            let mio_token = Token(0);
-            let poll = Poll::new()?;
-            poll.register(
-                listener,
-                mio_token,
-                Ready::readable(),
-                PollOpt::edge(),
-            )?;
-            let mut events = Events::with_capacity(1);
+            let mio_token = self.mio_token;
             
             let start = Instant::now();
             
@@ -228,84 +225,99 @@ pub mod receiver {
                     return Err(Box::new(simple_error::simple_error!("TCP listening for stream {} timed out", self.stream_idx)));
                 }
                 
-                poll.poll(&mut events, Some(POLL_TIMEOUT))?;
-                for event in events.iter() {
-                    match event.token() {
-                        _ => loop {
-                            match listener.accept() {
-                                Ok((stream, address)) => {
-                                    log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
-                                    
-                                    let mut verification_stream = stream.try_clone()?;
-                                    let mio_token2 = Token(0);
-                                    let poll2 = Poll::new()?;
-                                    poll2.register(
-                                        &verification_stream,
-                                        mio_token2,
-                                        Ready::readable(),
-                                        PollOpt::edge(),
-                                    )?;
-                                    
-                                    let mut buffer = [0_u8; 16];
-                                    let mut events2 = Events::with_capacity(1);
-                                    poll2.poll(&mut events2, Some(RECEIVE_TIMEOUT))?;
-                                    for event2 in events2.iter() {
-                                        match event2.token() {
-                                            _ => match verification_stream.read(&mut buffer) {
-                                                Ok(_) => {
-                                                    if buffer == self.test_definition.test_id {
-                                                        log::debug!("validated TCP stream {} connection from {}", self.stream_idx, address);
-                                                        if !cfg!(windows) { //NOTE: features unsupported on Windows
-                                                            if self.receive_buffer != 0 {
-                                                                log::debug!("setting receive-buffer to {}...", self.receive_buffer);
-                                                                super::setsockopt(stream.as_raw_fd(), super::RcvBuf, &self.receive_buffer)?;
-                                                            }
-                                                        }
-                                                        
-                                                        self.mio_poll.register(
-                                                            &stream,
-                                                            self.mio_poll_token,
-                                                            Ready::readable(),
-                                                            PollOpt::edge(),
-                                                        )?;
-                                                        return Ok(stream);
-                                                    }
-                                                },
-                                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { //client didn't provide anything
-                                                    break;
-                                                },
-                                                Err(e) => {
-                                                    return Err(Box::new(e));
-                                                },
-                                            }
-                                        }
-                                    }
-                                    log::warn!("could not validate TCP stream {} connection from {}", self.stream_idx, address);
-                                },
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { //nothing to do
-                                    break;
-                                },
-                                Err(e) => {
-                                    return Err(Box::new(e));
-                                },
-                            }
-                        },
+                let mut stream:Option<TcpStream> = None; //assigned upon establishing a connection
+                
+                self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT))?;
+                for event in self.mio_events.iter() {
+                    if event.token() == mio_token {
+                        match listener.accept() {
+                            Ok((mut new_stream, address)) => {
+                                log::debug!("received TCP stream {} connection from {}", self.stream_idx, address);
+                                
+                                //hand over flow to the new connection
+                                self.mio_poll.registry().deregister(listener)?;
+                                self.mio_poll.registry().register(&mut new_stream, mio_token, mio::Interest::READABLE)?;
+                                stream = Some(new_stream);
+                                break;
+                            },
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => { //no pending connections available
+                                break;
+                            },
+                            Err(e) => {
+                                return Err(Box::new(e));
+                            },
+                        }
+                    } else {
+                        log::warn!("got event for unbound token: {:?}", event);
                     }
                 }
+                
+                if stream.is_some() {
+                    let mut unwrapped_stream = stream.unwrap();
+                    
+                    //process the stream
+                    let mut buf = vec![0_u8; self.test_definition.length];
+                    let mut validated:bool = false;
+                    let mut bytes_received:u64 = 0;
+                    
+                    let start_validation = Instant::now();
+                    
+                    self.mio_poll.poll(&mut self.mio_events, Some(CONNECTION_TIMEOUT))?;
+                    for event in self.mio_events.iter() {
+                        if event.token() == mio_token {
+                            loop {
+                                match unwrapped_stream.read(&mut buf) {
+                                    Ok(packet_size) => {
+                                        if !validated {
+                                            if buf[..16] == self.test_definition.test_id {
+                                                log::debug!("validated TCP stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
+                                                validated = true;
+                                            } else {
+                                                log::warn!("unexpected ID in stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
+                                                break;
+                                            }
+                                        }
+                                        
+                                        if validated {
+                                            bytes_received += packet_size as u64;
+                                        }
+                                    },
+                                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //end of input reached
+                                        break;
+                                    },
+                                    Err(e) => {
+                                        let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
+                                        self.mio_poll.registry().deregister(&mut unwrapped_stream)?;
+                                        return Err(Box::new(e));
+                                    },
+                                }
+                            }
+                        }
+                    }
+                    if validated {
+                        return Ok((unwrapped_stream, bytes_received, start_validation.elapsed().as_secs_f32()));
+                    }
+                    
+                    let _ = unwrapped_stream.shutdown(std::net::Shutdown::Both);
+                    self.mio_poll.registry().deregister(&mut unwrapped_stream)?;
+                    log::warn!("could not validate TCP stream {} connection from {}", self.stream_idx, unwrapped_stream.peer_addr()?);
+                }
             }
-            Err(Box::new(simple_error::simple_error!("did not receive a connection")))
+            Err(Box::new(simple_error::simple_error!("did not establish a connection")))
         }
     }
     impl super::TestStream for TcpReceiver {
         fn run_interval(&mut self) -> Option<super::BoxResult<Box<dyn super::IntervalResult + Sync + Send>>> {
             let mut bytes_received:u64 = 0;
             
+            let mut additional_time_elapsed:f32 = 0.0;
             if self.stream.is_none() { //if still in the setup phase, receive the sender
                 match self.process_connection() {
-                    Ok(stream) => {
+                    Ok((stream, bytes_received_in_validation, time_spent_in_validation)) => {
                         self.stream = Some(stream);
-                        //NOTE: the connection process consumes the test-header; account for those bytes
-                        bytes_received += super::TEST_HEADER_SIZE as u64;
+                        //NOTE: the connection process consumes packets; account for those bytes
+                        bytes_received += bytes_received_in_validation;
+                        additional_time_elapsed += time_spent_in_validation;
                     },
                     Err(e) => {
                         return Some(Err(e));
@@ -315,7 +327,7 @@ pub mod receiver {
             }
             let stream = self.stream.as_mut().unwrap();
             
-            let mut events = Events::with_capacity(1); //only watching one socket
+            let mio_token = self.mio_token;
             let mut buf = vec![0_u8; self.test_definition.length];
             
             let peer_addr = match stream.peer_addr() {
@@ -324,18 +336,11 @@ pub mod receiver {
             };
             let start = Instant::now();
             
-            while self.active {
-                if start.elapsed() >= RECEIVE_TIMEOUT {
-                    return Some(Err(Box::new(simple_error::simple_error!("TCP reception for stream {} from {} timed out", self.stream_idx, peer_addr))));
-                }
-                
+            while self.active && start.elapsed() < super::INTERVAL {
                 log::trace!("awaiting TCP stream {} from {}...", self.stream_idx, peer_addr);
-                let poll_result = self.mio_poll.poll(&mut events, Some(POLL_TIMEOUT));
-                if poll_result.is_err() {
-                    return Some(Err(Box::new(poll_result.unwrap_err())));
-                }
-                for event in events.iter() {
-                    if event.token() == self.mio_poll_token {
+                self.mio_poll.poll(&mut self.mio_events, Some(POLL_TIMEOUT)).ok()?;
+                for event in self.mio_events.iter() {
+                    if event.token() == mio_token {
                         loop {
                             match stream.read(&mut buf) {
                                 Ok(packet_size) => {
@@ -346,21 +351,8 @@ pub mod receiver {
                                     }
                                     
                                     bytes_received += packet_size as u64;
-                                    
-                                    let elapsed_time = start.elapsed();
-                                    if elapsed_time >= super::INTERVAL {
-                                        return Some(Ok(Box::new(super::TcpReceiveResult{
-                                            timestamp: super::get_unix_timestamp(),
-                                            
-                                            stream_idx: self.stream_idx,
-                                            
-                                            duration: elapsed_time.as_secs_f32(),
-                                            
-                                            bytes_received: bytes_received,
-                                        })))
-                                    }
                                 },
-                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => { //receive timeout
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => { //receive timeout
                                     break;
                                 },
                                 Err(e) => {
@@ -374,16 +366,18 @@ pub mod receiver {
                 }
             }
             if bytes_received > 0 {
+                log::debug!("{} bytes received via TCP stream {} from {} in this interval; reporting...", bytes_received, self.stream_idx, peer_addr);
                 Some(Ok(Box::new(super::TcpReceiveResult{
                     timestamp: super::get_unix_timestamp(),
                     
                     stream_idx: self.stream_idx,
                     
-                    duration: start.elapsed().as_secs_f32(),
+                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
                     
                     bytes_received: bytes_received,
                 })))
             } else {
+                log::debug!("no bytes received via TCP stream {} from {} in this interval", self.stream_idx, peer_addr);
                 None
             }
         }
@@ -412,11 +406,15 @@ pub mod receiver {
 
 pub mod sender {
     use std::io::Write;
-    use std::net::{IpAddr, SocketAddr};
-    use std::os::unix::io::AsRawFd;
+    use std::net::{IpAddr, SocketAddr, TcpStream};
     use std::time::{Duration, Instant};
     
-    use mio::net::TcpStream;
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            use crate::stream::tcp::KEEPALIVE_DURATION;
+            use socket2::{SockRef, TcpKeepalive};
+        }
+    }
     
     use std::thread::{sleep};
     
@@ -471,25 +469,33 @@ pub mod sender {
         fn process_connection(&mut self) -> super::BoxResult<TcpStream> {
             log::debug!("preparing to connect TCP stream {}...", self.stream_idx);
             
-            let raw_stream = match std::net::TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
+            let stream = match TcpStream::connect_timeout(&self.socket_addr, CONNECT_TIMEOUT) {
                 Ok(s) => s,
                 Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect stream {}: {}", self.stream_idx, e))),
             };
-            raw_stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-            let stream = match TcpStream::from_stream(raw_stream) {
-                Ok(s) => s,
-                Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP stream {}: {}", self.stream_idx, e))),
-            };
+            stream.set_nonblocking(true)?;
+            stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+            
+            cfg_if::cfg_if! {
+                if #[cfg(unix)] {
+                    let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+                    let raw_socket = SockRef::from(&stream);
+                    raw_socket.set_tcp_keepalive(&keepalive_parameters)?;
+                }
+            }
+            
             log::debug!("connected TCP stream {} to {}", self.stream_idx, stream.peer_addr()?);
             
             if self.no_delay {
                 log::debug!("setting no-delay...");
                 stream.set_nodelay(true)?;
             }
-            if !cfg!(windows) { //NOTE: features unsupported on Windows
-                if self.send_buffer != 0 {
-                    log::debug!("setting send-buffer to {}...", self.send_buffer);
-                    super::setsockopt(stream.as_raw_fd(), super::SndBuf, &self.send_buffer)?;
+            if self.send_buffer != 0 {
+                cfg_if::cfg_if! {
+                    if #[cfg(unix)] {
+                        log::debug!("setting send-buffer to {}...", self.send_buffer);
+                        raw_socket.set_send_buffer_size(self.send_buffer)?;
+                    }
                 }
             }
             Ok(stream)
@@ -543,6 +549,7 @@ pub mod sender {
                         if elapsed_time >= super::INTERVAL {
                             self.remaining_duration -= packet_start.elapsed().as_secs_f32();
                             
+                            log::debug!("{} bytes sent via TCP stream {} to {} in this interval; reporting...", bytes_sent, self.stream_idx, peer_addr);
                             return Some(Ok(Box::new(super::TcpSendResult{
                                 timestamp: super::get_unix_timestamp(),
                                 
@@ -582,6 +589,7 @@ pub mod sender {
                 self.remaining_duration -= packet_start.elapsed().as_secs_f32();
             }
             if bytes_sent > 0 {
+                log::debug!("{} bytes sent via TCP stream {} to {} in this interval; reporting...", bytes_sent, self.stream_idx, peer_addr);
                 Some(Ok(Box::new(super::TcpSendResult{
                     timestamp: super::get_unix_timestamp(),
                     
@@ -593,6 +601,7 @@ pub mod sender {
                     sends_blocked: sends_blocked,
                 })))
             } else {
+                log::debug!("no bytes sent via TCP stream {} to {} in this interval; shutting down...", self.stream_idx, peer_addr);
                 //indicate that the test is over by dropping the stream
                 self.stream = None;
                 None

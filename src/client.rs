@@ -27,9 +27,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::ArgMatches;
 
-use mio::net::{TcpStream};
+use std::net::{TcpStream};
+cfg_if::cfg_if! {
+    if #[cfg(unix)] {
+        use crate::protocol::communication::{KEEPALIVE_DURATION};
+        use socket2::{SockRef, TcpKeepalive};
+    }
+}
 
-use crate::protocol::communication::{receive, send, KEEPALIVE_DURATION};
+use crate::protocol::communication::{receive, send};
 
 use crate::protocol::messaging::{
     prepare_begin, prepare_end,
@@ -62,18 +68,23 @@ fn connect_to_server(address:&str, port:&u16) -> BoxResult<TcpStream> {
     if server_addr.is_none() {
         return Err(Box::new(simple_error::simple_error!("unable to resolve {}", address)));
     }
-    let raw_stream = match std::net::TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
+    
+    let stream = match TcpStream::connect_timeout(&server_addr.unwrap(), CONNECT_TIMEOUT) {
         Ok(s) => s,
         Err(e) => return Err(Box::new(simple_error::simple_error!("unable to connect: {}", e))),
     };
-    let stream = match TcpStream::from_stream(raw_stream) {
-        Ok(s) => s,
-        Err(e) => return Err(Box::new(simple_error::simple_error!("unable to prepare TCP control-channel: {}", e))),
-    };
-    log::info!("connected to server");
-    
+    log::debug!("connected TCP control-channel to {}", destination);
     stream.set_nodelay(true).expect("cannot disable Nagle's algorithm");
-    stream.set_keepalive(Some(KEEPALIVE_DURATION)).expect("unable to set TCP keepalive");
+    
+    cfg_if::cfg_if! {
+        if #[cfg(unix)] {
+            let keepalive_parameters = TcpKeepalive::new().with_time(KEEPALIVE_DURATION);
+            let raw_socket = SockRef::from(&stream);
+            raw_socket.set_tcp_keepalive(&keepalive_parameters).expect("unable to set TCP keepalive");
+        }
+    }
+    
+    log::info!("connected to server");
     
     Ok(stream)
 }
@@ -225,7 +236,6 @@ pub fn execute(args:ArgMatches) -> BoxResult<()> {
                     test_definition.clone(), &(stream_idx as u8),
                     &mut tcp_port_pool,
                     &server_addr.ip(),
-                    &(download_config["receive_buffer"].as_i64().unwrap() as usize),
                 )?;
                 stream_ports.push(test.get_port()?);
                 parallel_streams.push(Arc::new(Mutex::new(test)));
