@@ -74,7 +74,7 @@ fn handle_client(
     let peer_addr = stream.peer_addr()?;
 
     //scaffolding to track and relay the streams and stream-results associated with this client
-    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> = Vec::new();
+    let mut parallel_streams: Vec<Arc<Mutex<dyn TestStream + Sync + Send>>> = Vec::new();
     let mut parallel_streams_joinhandles = Vec::new();
     let (results_tx, results_rx): (
         std::sync::mpsc::Sender<Box<dyn crate::protocol::results::IntervalResult + Sync + Send>>,

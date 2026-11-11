@@ -382,8 +382,9 @@ pub mod receiver {
                 .duration_since(UNIX_EPOCH)
                 .expect("system time before UNIX epoch");
             let current_timestamp =
-                NaiveDateTime::from_timestamp_opt(now.as_secs() as i64, now.subsec_nanos())
-                    .unwrap();
+                chrono::DateTime::from_timestamp(now.as_secs() as i64, now.subsec_nanos())
+                    .expect("valid timestamp")
+                    .naive_utc();
 
             let time_delta = current_timestamp - *timestamp;
 
@@ -439,7 +440,9 @@ pub mod receiver {
                 //and the following four are the number of nanoseconds since the UNIX epoch
                 let origin_nanoseconds = u32::from_be_bytes(packet[32..36].try_into().unwrap());
                 let source_timestamp =
-                    NaiveDateTime::from_timestamp_opt(origin_seconds, origin_nanoseconds).unwrap();
+                    chrono::DateTime::from_timestamp(origin_seconds, origin_nanoseconds)
+                        .expect("valid source timestamp")
+                        .naive_utc();
 
                 history.unbroken_sequence += 1;
                 self.process_jitter(&source_timestamp, &mut history);

@@ -172,7 +172,7 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
 
     //scaffolding to track and relay the streams and stream-results associated with this test
     let stream_count = download_config.get("streams").unwrap().as_i64().unwrap() as usize;
-    let mut parallel_streams: Vec<Arc<Mutex<(dyn TestStream + Sync + Send)>>> =
+    let mut parallel_streams: Vec<Arc<Mutex<dyn TestStream + Sync + Send>>> =
         Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
     let (results_tx, results_rx): (
