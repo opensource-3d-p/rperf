@@ -171,7 +171,7 @@ fn validate_bandwidth(bandwidth: u64) -> u64 {
         log::warn!(
             "bandwidth was not specified; defaulting to {} bytes/second ({} megabit/second)",
             DEFAULT_BANDWIDTH,
-            DEFAULT_BANDWIDTH / DEFAULT_BANDWIDTH,
+            DEFAULT_BANDWIDTH * 8 / 1_000_000,
         );
         DEFAULT_BANDWIDTH
     }

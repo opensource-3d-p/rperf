@@ -60,7 +60,7 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
         message,
         stream.peer_addr()?
     );
-    let mut output_buffer = vec![0_u8; (serialised_message.len() + 2).into()];
+    let mut output_buffer = vec![0_u8; serialised_message.len() + 2];
     output_buffer[..2].copy_from_slice(&(serialised_message.len() as u16).to_be_bytes());
     output_buffer[2..].copy_from_slice(serialised_message.as_slice());
 
@@ -86,10 +86,10 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
             }
         }
     }
-    return Err(Box::new(simple_error::simple_error!(
+    Err(Box::new(simple_error::simple_error!(
         "timed out while attempting to send status-message to {}",
         stream.peer_addr()?
-    )));
+    )))
 }
 
 /// receives the length-count of a pending message over a client-server communications stream
@@ -211,14 +211,14 @@ fn receive_payload(
 }
 /// handles the full process of retrieving a message from a client-server communications stream
 pub fn receive(
-    mut stream: &mut TcpStream,
+    stream: &mut TcpStream,
     alive_check: fn() -> bool,
     results_handler: &mut dyn FnMut() -> BoxResult<()>,
 ) -> BoxResult<serde_json::Value> {
     log::debug!("awaiting length-value from {}...", stream.peer_addr()?);
-    let length = receive_length(&mut stream, alive_check, results_handler)?;
+    let length = receive_length(stream, alive_check, results_handler)?;
     log::debug!("awaiting payload from {}...", stream.peer_addr()?);
-    receive_payload(&mut stream, alive_check, results_handler, length)
+    receive_payload(stream, alive_check, results_handler, length)
 }
 
 //AI-generated tests

@@ -214,13 +214,12 @@ impl IntervalResult for TcpReceiveResult {
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor;
-        if self.duration == 0.0 {
+        let duration_divisor = if self.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
-            duration_divisor = 1.0;
+            1.0
         } else {
-            duration_divisor = self.duration;
-        }
+            self.duration
+        };
 
         let bytes_per_second = self.bytes_received as f32 / duration_divisor;
 
@@ -257,7 +256,7 @@ impl TcpSendResult {
         let mut local_value = value.clone();
         if local_value.get("sends_blocked").is_none() {
             //pre-0.1.8 peer
-            local_value["sends_blocked"] = serde_json::json!(0 as u64); //report pre-0.1.8 status
+            local_value["sends_blocked"] = serde_json::json!(0_u64); //report pre-0.1.8 status
         }
 
         let send_result: TcpSendResult = serde_json::from_value(local_value)?;
@@ -287,13 +286,12 @@ impl IntervalResult for TcpSendResult {
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor;
-        if self.duration == 0.0 {
+        let duration_divisor = if self.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
-            duration_divisor = 1.0;
+            1.0
         } else {
-            duration_divisor = self.duration;
-        }
+            self.duration
+        };
 
         let bytes_per_second = self.bytes_sent as f32 / duration_divisor;
 
@@ -367,13 +365,12 @@ impl IntervalResult for UdpReceiveResult {
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor;
-        if self.duration == 0.0 {
+        let duration_divisor = if self.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
-            duration_divisor = 1.0;
+            1.0
         } else {
-            duration_divisor = self.duration;
-        }
+            self.duration
+        };
 
         let bytes_per_second = self.bytes_received as f32 / duration_divisor;
 
@@ -393,11 +390,10 @@ impl IntervalResult for UdpReceiveResult {
                                 self.bytes_received, bytes_per_second, throughput,
                                 self.packets_received, self.packets_lost, self.packets_out_of_order, self.packets_duplicated, self.packets_received as f32 / duration_divisor,
         );
-        if self.jitter_seconds.is_some() {
+        if let Some(jitter_seconds) = self.jitter_seconds {
             output.push_str(&format!(
                 "\njitter: {:.6}s over {} consecutive packets",
-                self.jitter_seconds.unwrap(),
-                self.unbroken_sequence
+                jitter_seconds, self.unbroken_sequence
             ));
         }
         output
@@ -421,7 +417,7 @@ impl UdpSendResult {
         let mut local_value = value.clone();
         if local_value.get("sends_blocked").is_none() {
             //pre-0.1.8 peer
-            local_value["sends_blocked"] = serde_json::json!(0 as u64); //report pre-0.1.8 status
+            local_value["sends_blocked"] = serde_json::json!(0_u64); //report pre-0.1.8 status
         }
 
         let send_result: UdpSendResult = serde_json::from_value(local_value)?;
@@ -451,13 +447,12 @@ impl IntervalResult for UdpSendResult {
     }
 
     fn to_string(&self, bit: bool) -> String {
-        let duration_divisor;
-        if self.duration == 0.0 {
+        let duration_divisor = if self.duration == 0.0 {
             //avoid zerodiv, which can happen if the stream fails
-            duration_divisor = 1.0;
+            1.0
         } else {
-            duration_divisor = self.duration;
-        }
+            self.duration
+        };
 
         let bytes_per_second = self.bytes_sent as f32 / duration_divisor;
 
@@ -562,10 +557,15 @@ impl StreamResults for TcpStreamResults {
         match value.get("kind") {
             Some(k) => match k.as_str() {
                 Some(kind) => match kind {
-                    "send" => Ok(self.send_results.push(TcpSendResult::from_json(value)?)),
-                    "receive" => Ok(self
-                        .receive_results
-                        .push(TcpReceiveResult::from_json(value)?)),
+                    "send" => {
+                        self.send_results.push(TcpSendResult::from_json(value)?);
+                        Ok(())
+                    }
+                    "receive" => {
+                        self.receive_results
+                            .push(TcpReceiveResult::from_json(value)?);
+                        Ok(())
+                    }
                     _ => Err(Box::new(simple_error::simple_error!(
                         "unsupported kind for TCP stream-result: {}",
                         kind
@@ -631,10 +631,15 @@ impl StreamResults for UdpStreamResults {
         match value.get("kind") {
             Some(k) => match k.as_str() {
                 Some(kind) => match kind {
-                    "send" => Ok(self.send_results.push(UdpSendResult::from_json(value)?)),
-                    "receive" => Ok(self
-                        .receive_results
-                        .push(UdpReceiveResult::from_json(value)?)),
+                    "send" => {
+                        self.send_results.push(UdpSendResult::from_json(value)?);
+                        Ok(())
+                    }
+                    "receive" => {
+                        self.receive_results
+                            .push(UdpReceiveResult::from_json(value)?);
+                        Ok(())
+                    }
                     _ => Err(Box::new(simple_error::simple_error!(
                         "unsupported kind for UDP stream-result: {}",
                         kind
@@ -690,9 +695,8 @@ impl StreamResults for UdpStreamResults {
             packets_out_of_order += rr.packets_out_of_order;
             packets_duplicated += rr.packets_duplicated;
 
-            if rr.jitter_seconds.is_some() {
-                jitter_weight +=
-                    (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+            if let Some(jitter_seconds) = rr.jitter_seconds {
+                jitter_weight += (rr.unbroken_sequence as f64) * (jitter_seconds as f64);
                 unbroken_sequence_count += rr.unbroken_sequence;
 
                 jitter_calculated = true;
@@ -715,8 +719,8 @@ impl StreamResults for UdpStreamResults {
             "packets_out_of_order": packets_out_of_order,
             "packets_duplicated": packets_duplicated,
         });
-        if packets_sent > 0 {
-            summary["framed_packet_size"] = serde_json::json!(bytes_sent / packets_sent);
+        if let Some(framed_packet_size) = bytes_sent.checked_div(packets_sent) {
+            summary["framed_packet_size"] = serde_json::json!(framed_packet_size);
         }
         if jitter_calculated {
             summary["jitter_average"] =
@@ -826,7 +830,7 @@ impl TestResults for TcpTestResults {
     }
 
     fn is_success(&self) -> bool {
-        self.pending_tests.len() == 0 && self.failed_tests.len() == 0
+        self.pending_tests.is_empty() && self.failed_tests.is_empty()
     }
 
     fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
@@ -968,13 +972,12 @@ impl TestResults for TcpTestResults {
         stream_send_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
         stream_receive_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let send_duration_divisor;
-        if duration_send == 0.0 {
+        let send_duration_divisor = if duration_send == 0.0 {
             //avoid zerodiv, which can happen if all streams fail
-            send_duration_divisor = 1.0;
+            1.0
         } else {
-            send_duration_divisor = duration_send;
-        }
+            duration_send
+        };
         let send_bytes_per_second = bytes_sent as f64 / send_duration_divisor;
         let send_throughput = match bit {
             true => format!(
@@ -997,13 +1000,12 @@ impl TestResults for TcpTestResults {
             ),
         };
 
-        let receive_duration_divisor;
-        if duration_receive == 0.0 {
+        let receive_duration_divisor = if duration_receive == 0.0 {
             //avoid zerodiv, which can happen if all streams fail
-            receive_duration_divisor = 1.0;
+            1.0
         } else {
-            receive_duration_divisor = duration_receive;
-        }
+            duration_receive
+        };
         let receive_bytes_per_second = bytes_received as f64 / receive_duration_divisor;
         let receive_throughput = match bit {
             true => format!(
@@ -1051,10 +1053,10 @@ impl TestResults for TcpTestResults {
             total_receive_throughput,
         );
         if sends_blocked {
-            output.push_str(&format!("\nthroughput throttled by buffer limitations"));
+            output.push_str("\nthroughput throttled by buffer limitations");
         }
         if !self.is_success() {
-            output.push_str(&format!("\nTESTING DID NOT COMPLETE SUCCESSFULLY"));
+            output.push_str("\nTESTING DID NOT COMPLETE SUCCESSFULLY");
         }
 
         output
@@ -1112,7 +1114,7 @@ impl TestResults for UdpTestResults {
     }
 
     fn is_success(&self) -> bool {
-        self.pending_tests.len() == 0 && self.failed_tests.len() == 0
+        self.pending_tests.is_empty() && self.failed_tests.is_empty()
     }
 
     fn update_from_json(&mut self, value: serde_json::Value) -> BoxResult<()> {
@@ -1206,9 +1208,8 @@ impl TestResults for UdpTestResults {
                 packets_out_of_order += rr.packets_out_of_order;
                 packets_duplicated += rr.packets_duplicated;
 
-                if rr.jitter_seconds.is_some() {
-                    jitter_weight +=
-                        (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                if let Some(jitter_seconds) = rr.jitter_seconds {
+                    jitter_weight += (rr.unbroken_sequence as f64) * (jitter_seconds as f64);
                     unbroken_sequence_count += rr.unbroken_sequence;
 
                     jitter_calculated = true;
@@ -1232,8 +1233,8 @@ impl TestResults for UdpTestResults {
             "packets_out_of_order": packets_out_of_order,
             "packets_duplicated": packets_duplicated,
         });
-        if packets_sent > 0 {
-            summary["framed_packet_size"] = serde_json::json!(bytes_sent / packets_sent);
+        if let Some(framed_packet_size) = bytes_sent.checked_div(packets_sent) {
+            summary["framed_packet_size"] = serde_json::json!(framed_packet_size);
         }
         if jitter_calculated {
             summary["jitter_average"] =
@@ -1305,9 +1306,8 @@ impl TestResults for UdpTestResults {
                 packets_out_of_order += rr.packets_out_of_order;
                 packets_duplicated += rr.packets_duplicated;
 
-                if rr.jitter_seconds.is_some() {
-                    jitter_weight +=
-                        (rr.unbroken_sequence as f64) * (rr.jitter_seconds.unwrap() as f64);
+                if let Some(jitter_seconds) = rr.jitter_seconds {
+                    jitter_weight += (rr.unbroken_sequence as f64) * (jitter_seconds as f64);
                     unbroken_sequence_count += rr.unbroken_sequence;
 
                     jitter_calculated = true;
@@ -1317,13 +1317,12 @@ impl TestResults for UdpTestResults {
         stream_send_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
         stream_receive_durations.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
-        let send_duration_divisor;
-        if duration_send == 0.0 {
+        let send_duration_divisor = if duration_send == 0.0 {
             //avoid zerodiv, which can happen if all streams fail
-            send_duration_divisor = 1.0;
+            1.0
         } else {
-            send_duration_divisor = duration_send;
-        }
+            duration_send
+        };
         let send_bytes_per_second = bytes_sent as f64 / send_duration_divisor;
         let send_throughput = match bit {
             true => format!(
@@ -1346,13 +1345,12 @@ impl TestResults for UdpTestResults {
             ),
         };
 
-        let receive_duration_divisor;
-        if duration_receive == 0.0 {
+        let receive_duration_divisor = if duration_receive == 0.0 {
             //avoid zerodiv, which can happen if all streams fail
-            receive_duration_divisor = 1.0;
+            1.0
         } else {
-            receive_duration_divisor = duration_receive;
-        }
+            duration_receive
+        };
         let receive_bytes_per_second = bytes_received as f64 / receive_duration_divisor;
         let receive_throughput = match bit {
             true => format!(
@@ -1377,13 +1375,13 @@ impl TestResults for UdpTestResults {
 
         let packets_lost =
             packets_sent.saturating_sub(packets_received.saturating_sub(packets_duplicated));
-        let packets_sent_divisor;
-        if packets_sent == 0 {
+
+        let packets_sent_divisor = if packets_sent == 0 {
             //avoid zerodiv, which can happen if all streams fail
-            packets_sent_divisor = 1.0
+            1.0
         } else {
-            packets_sent_divisor = packets_sent as f64;
-        }
+            packets_sent as f64
+        };
         let mut output = format!("==========\n\
                                   UDP send result over {:.2}s | streams: {}\n\
                                   stream-average bytes per second: {:.3} | {}\n\
@@ -1412,10 +1410,10 @@ impl TestResults for UdpTestResults {
             ));
         }
         if sends_blocked {
-            output.push_str(&format!("\nthroughput throttled by buffer limitations"));
+            output.push_str("\nthroughput throttled by buffer limitations");
         }
         if !self.is_success() {
-            output.push_str(&format!("\nTESTING DID NOT COMPLETE SUCCESSFULLY"));
+            output.push_str("\nTESTING DID NOT COMPLETE SUCCESSFULLY");
         }
 
         output

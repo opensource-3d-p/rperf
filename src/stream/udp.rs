@@ -82,7 +82,7 @@ impl UdpTestDefinition {
                 .unwrap_or(&serde_json::json!(0.0))
                 .as_f64()
                 .unwrap() as u64,
-            length: length,
+            length,
         })
     }
 }
@@ -146,23 +146,28 @@ pub mod receiver {
             match peer_ip {
                 IpAddr::V6(_) => {
                     if self.ports_ip6.is_empty() {
-                        return Ok(UdpSocket::bind(&SocketAddr::new(
+                        return Ok(UdpSocket::bind(SocketAddr::new(
                             IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                             0,
                         ))
-                        .expect(format!("failed to bind OS-assigned IPv6 UDP socket").as_str()));
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "{}",
+                                "failed to bind OS-assigned IPv6 UDP socket".to_string()
+                            )
+                        }));
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
 
                         for port_idx in (self.pos_ip6 + 1)..self.ports_ip6.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result = UdpSocket::bind(&SocketAddr::new(
+                            let listener_result = UdpSocket::bind(SocketAddr::new(
                                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                                 self.ports_ip6[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip6 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv6 UDP port {}",
@@ -172,13 +177,13 @@ pub mod receiver {
                         }
                         for port_idx in 0..=self.pos_ip6 {
                             //circle back to where the search started
-                            let listener_result = UdpSocket::bind(&SocketAddr::new(
+                            let listener_result = UdpSocket::bind(SocketAddr::new(
                                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                                 self.ports_ip6[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip6 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv6 UDP port {}",
@@ -187,29 +192,34 @@ pub mod receiver {
                             }
                         }
                     }
-                    return Err(Box::new(simple_error::simple_error!(
+                    Err(Box::new(simple_error::simple_error!(
                         "unable to allocate IPv6 UDP port"
-                    )));
+                    )))
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
-                        return Ok(UdpSocket::bind(&SocketAddr::new(
+                        return Ok(UdpSocket::bind(SocketAddr::new(
                             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                             0,
                         ))
-                        .expect(format!("failed to bind OS-assigned IPv4 UDP socket").as_str()));
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "{}",
+                                "failed to bind OS-assigned IPv4 UDP socket".to_string()
+                            )
+                        }));
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
 
                         for port_idx in (self.pos_ip4 + 1)..self.ports_ip4.len() {
                             //iterate to the end of the pool; this will skip the first element in the pool initially, but that's fine
-                            let listener_result = UdpSocket::bind(&SocketAddr::new(
+                            let listener_result = UdpSocket::bind(SocketAddr::new(
                                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                                 self.ports_ip4[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip4 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv4 UDP port {}",
@@ -219,13 +229,13 @@ pub mod receiver {
                         }
                         for port_idx in 0..=self.pos_ip4 {
                             //circle back to where the search started
-                            let listener_result = UdpSocket::bind(&SocketAddr::new(
+                            let listener_result = UdpSocket::bind(SocketAddr::new(
                                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                                 self.ports_ip4[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip4 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv4 UDP port {}",
@@ -234,11 +244,11 @@ pub mod receiver {
                             }
                         }
                     }
-                    return Err(Box::new(simple_error::simple_error!(
+                    Err(Box::new(simple_error::simple_error!(
                         "unable to allocate IPv4 UDP port"
-                    )));
+                    )))
                 }
-            };
+            }
         }
     }
 
@@ -278,7 +288,7 @@ pub mod receiver {
             log::debug!("binding UDP receive socket for stream {}...", stream_idx);
             let socket: UdpSocket = port_pool
                 .bind(peer_ip)
-                .expect(format!("failed to bind UDP socket").as_str());
+                .unwrap_or_else(|_| panic!("{}", "failed to bind UDP socket".to_string()));
             socket.set_read_timeout(Some(READ_TIMEOUT))?;
             if *receive_buffer != 0 {
                 cfg_if::cfg_if! {
@@ -297,13 +307,13 @@ pub mod receiver {
 
             Ok(UdpReceiver {
                 active: true,
-                test_definition: test_definition,
+                test_definition,
                 stream_idx: stream_idx.to_owned(),
 
                 next_packet_id: 0,
                 consecutive_empty_intervals: 0,
 
-                socket: socket,
+                socket,
             })
         }
 
@@ -366,7 +376,7 @@ pub mod receiver {
                     history.packets_duplicated += 1;
                 }
             }
-            return false;
+            false
         }
 
         fn process_jitter(
@@ -421,7 +431,7 @@ pub mod receiver {
         fn process_packet(
             &mut self,
             packet: &[u8],
-            mut history: &mut UdpReceiverIntervalHistory,
+            history: &mut UdpReceiverIntervalHistory,
         ) -> bool {
             //the first sixteen bytes are the test's ID
             if packet[0..16] != self.test_definition.test_id {
@@ -434,7 +444,7 @@ pub mod receiver {
             //except for the timestamp, nothing else in the packet actually matters
 
             history.packets_received += 1;
-            if self.process_packets_ordering(packet_id, &mut history) {
+            if self.process_packets_ordering(packet_id, history) {
                 //the second eight are the number of seconds since the UNIX epoch, in big-endian order
                 let origin_seconds = i64::from_be_bytes(packet[24..32].try_into().unwrap());
                 //and the following four are the number of nanoseconds since the UNIX epoch
@@ -445,7 +455,7 @@ pub mod receiver {
                         .naive_utc();
 
                 history.unbroken_sequence += 1;
-                self.process_jitter(&source_timestamp, &mut history);
+                self.process_jitter(&source_timestamp, history);
 
                 if history.unbroken_sequence > history.longest_unbroken_sequence {
                     history.longest_unbroken_sequence = history.unbroken_sequence;
@@ -455,7 +465,7 @@ pub mod receiver {
                 history.unbroken_sequence = 0;
                 history.jitter_seconds = None;
             }
-            return true;
+            true
         }
     }
     impl super::TestStream for UdpReceiver {
@@ -495,7 +505,7 @@ pub mod receiver {
                             );
                             if packet_size == 16 {
                                 //possible end-of-test message
-                                if &buf[0..16] == self.test_definition.test_id {
+                                if buf[0..16] == self.test_definition.test_id {
                                     //test's over
                                     self.stop();
                                     break;
@@ -572,7 +582,7 @@ pub mod receiver {
 
                 duration: start.elapsed().as_secs_f32(),
 
-                bytes_received: bytes_received,
+                bytes_received,
                 packets_received: history.packets_received,
                 packets_lost: history.packets_lost,
                 packets_out_of_order: history.packets_out_of_order,
@@ -643,12 +653,12 @@ pub mod sender {
             let socket_addr_receiver = SocketAddr::new(*receiver_ip, *receiver_port);
             let socket = match receiver_ip {
                 IpAddr::V6(_) => {
-                    UdpSocket::bind(&SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))
-                        .expect(format!("failed to bind UDP socket, port {}", port).as_str())
+                    UdpSocket::bind(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), *port))
+                        .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port))
                 }
                 IpAddr::V4(_) => {
-                    UdpSocket::bind(&SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))
-                        .expect(format!("failed to bind UDP socket, port {}", port).as_str())
+                    UdpSocket::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), *port))
+                        .unwrap_or_else(|_| panic!("failed to bind UDP socket, port {}", port))
                 }
             };
             socket.set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -678,16 +688,16 @@ pub mod sender {
 
             Ok(UdpSender {
                 active: true,
-                test_definition: test_definition,
+                test_definition,
                 stream_idx: stream_idx.to_owned(),
 
-                socket: socket,
+                socket,
 
                 send_interval: send_interval.to_owned(),
 
                 remaining_duration: send_duration.to_owned(),
                 next_packet_id: 0,
-                staged_packet: staged_packet,
+                staged_packet,
             })
         }
 
@@ -765,9 +775,9 @@ pub mod sender {
 
                                 duration: elapsed_time.as_secs_f32(),
 
-                                bytes_sent: bytes_sent,
-                                packets_sent: packets_sent,
-                                sends_blocked: sends_blocked,
+                                bytes_sent,
+                                packets_sent,
+                                sends_blocked,
                             })));
                         }
                     }
@@ -813,9 +823,9 @@ pub mod sender {
 
                     duration: cycle_start.elapsed().as_secs_f32(),
 
-                    bytes_sent: bytes_sent,
-                    packets_sent: packets_sent,
-                    sends_blocked: sends_blocked,
+                    bytes_sent,
+                    packets_sent,
+                    sends_blocked,
                 })))
             } else {
                 log::debug!(

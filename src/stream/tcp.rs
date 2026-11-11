@@ -81,7 +81,7 @@ impl TcpTestDefinition {
                 .unwrap_or(&serde_json::json!(0.0))
                 .as_f64()
                 .unwrap() as u64,
-            length: length,
+            length,
         })
     }
 }
@@ -141,7 +141,12 @@ pub mod receiver {
                             IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                             0,
                         ))
-                        .expect(format!("failed to bind OS-assigned IPv6 TCP socket").as_str()));
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "{}",
+                                "failed to bind OS-assigned IPv6 TCP socket".to_string()
+                            )
+                        }));
                     } else {
                         let _guard = self.lock_ip6.lock().unwrap();
 
@@ -151,9 +156,9 @@ pub mod receiver {
                                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                                 self.ports_ip6[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip6 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv6 TCP port {}",
@@ -167,9 +172,9 @@ pub mod receiver {
                                 IpAddr::V6(Ipv6Addr::UNSPECIFIED),
                                 self.ports_ip6[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip6 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv6 TCP port {}",
@@ -178,9 +183,9 @@ pub mod receiver {
                             }
                         }
                     }
-                    return Err(Box::new(simple_error::simple_error!(
+                    Err(Box::new(simple_error::simple_error!(
                         "unable to allocate IPv6 TCP port"
-                    )));
+                    )))
                 }
                 IpAddr::V4(_) => {
                     if self.ports_ip4.is_empty() {
@@ -188,7 +193,12 @@ pub mod receiver {
                             IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                             0,
                         ))
-                        .expect(format!("failed to bind OS-assigned IPv4 TCP socket").as_str()));
+                        .unwrap_or_else(|_| {
+                            panic!(
+                                "{}",
+                                "failed to bind OS-assigned IPv4 TCP socket".to_string()
+                            )
+                        }));
                     } else {
                         let _guard = self.lock_ip4.lock().unwrap();
 
@@ -198,9 +208,9 @@ pub mod receiver {
                                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                                 self.ports_ip4[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip4 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv4 TCP port {}",
@@ -214,9 +224,9 @@ pub mod receiver {
                                 IpAddr::V4(Ipv4Addr::UNSPECIFIED),
                                 self.ports_ip4[port_idx],
                             ));
-                            if listener_result.is_ok() {
+                            if let Ok(listener) = listener_result {
                                 self.pos_ip4 = port_idx;
-                                return Ok(listener_result.unwrap());
+                                return Ok(listener);
                             } else {
                                 log::warn!(
                                     "unable to bind IPv4 TCP port {}",
@@ -225,11 +235,11 @@ pub mod receiver {
                             }
                         }
                     }
-                    return Err(Box::new(simple_error::simple_error!(
+                    Err(Box::new(simple_error::simple_error!(
                         "unable to allocate IPv4 TCP port"
-                    )));
+                    )))
                 }
-            };
+            }
         }
     }
 
@@ -272,15 +282,15 @@ pub mod receiver {
 
             Ok(TcpReceiver {
                 active: true,
-                test_definition: test_definition,
+                test_definition,
                 stream_idx: stream_idx.to_owned(),
 
                 listener: Some(listener),
                 stream: None,
 
-                mio_events: mio_events,
-                mio_poll: mio_poll,
-                mio_token: mio_token,
+                mio_events,
+                mio_poll,
+                mio_token,
             })
         }
 
@@ -340,9 +350,7 @@ pub mod receiver {
                     }
                 }
 
-                if stream.is_some() {
-                    let mut unwrapped_stream = stream.unwrap();
-
+                if let Some(mut unwrapped_stream) = stream {
                     //process the stream
                     let mut buf = vec![0_u8; self.test_definition.length];
                     let mut validated: bool = false;
@@ -535,7 +543,7 @@ pub mod receiver {
 
                 duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
 
-                bytes_received: bytes_received,
+                bytes_received,
             })))
         }
 
@@ -608,16 +616,20 @@ pub mod sender {
             no_delay: &bool,
         ) -> super::BoxResult<TcpSender> {
             let mut staged_buffer = vec![0_u8; test_definition.length];
-            for i in super::TEST_HEADER_SIZE..(staged_buffer.len()) {
+            for (i, byte) in staged_buffer
+                .iter_mut()
+                .enumerate()
+                .skip(super::TEST_HEADER_SIZE)
+            {
                 //fill the packet with a fixed sequence
-                staged_buffer[i] = (i % 256) as u8;
+                *byte = (i % 256) as u8;
             }
             //embed the test ID
             staged_buffer[0..16].copy_from_slice(&test_definition.test_id);
 
             Ok(TcpSender {
                 active: true,
-                test_definition: test_definition,
+                test_definition,
                 stream_idx: stream_idx.to_owned(),
 
                 socket_addr: SocketAddr::new(*receiver_ip, *receiver_port),
@@ -626,7 +638,7 @@ pub mod sender {
                 send_interval: send_interval.to_owned(),
 
                 remaining_duration: send_duration.to_owned(),
-                staged_buffer: staged_buffer,
+                staged_buffer,
 
                 send_buffer: send_buffer.to_owned(),
                 no_delay: no_delay.to_owned(),
@@ -749,8 +761,8 @@ pub mod sender {
 
                                 duration: elapsed_time.as_secs_f32(),
 
-                                bytes_sent: bytes_sent,
-                                sends_blocked: sends_blocked,
+                                bytes_sent,
+                                sends_blocked,
                             })));
                         }
                     }
@@ -797,8 +809,8 @@ pub mod sender {
 
                     duration: cycle_start.elapsed().as_secs_f32(),
 
-                    bytes_sent: bytes_sent,
-                    sends_blocked: sends_blocked,
+                    bytes_sent,
+                    sends_blocked,
                 })))
             } else {
                 log::debug!(

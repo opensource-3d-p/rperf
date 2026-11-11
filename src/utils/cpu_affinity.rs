@@ -44,7 +44,7 @@ impl CpuAffinityManager {
             let mut cid_valid = false;
             for core_id in &core_ids {
                 if core_id.id == cid_usize {
-                    enabled_cores.push(core_id.clone());
+                    enabled_cores.push(*core_id);
                     cid_valid = true;
                 }
             }
@@ -52,20 +52,20 @@ impl CpuAffinityManager {
                 log::warn!("unrecognised CPU core: {}", cid_usize);
             }
         }
-        if enabled_cores.len() > 0 {
+        if !enabled_cores.is_empty() {
             log::debug!("selecting from CPU cores {:?}", enabled_cores);
         } else {
             log::debug!("not applying CPU core affinity");
         }
 
         Ok(CpuAffinityManager {
-            enabled_cores: enabled_cores,
+            enabled_cores,
             last_core_pointer: 0,
         })
     }
 
     pub fn set_affinity(&mut self) {
-        if self.enabled_cores.len() > 0 {
+        if !self.enabled_cores.is_empty() {
             let core_id = self.enabled_cores[self.last_core_pointer];
             log::debug!("setting CPU affinity to {}", core_id.id);
             core_affinity::set_for_current(core_id);

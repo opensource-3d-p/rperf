@@ -266,8 +266,8 @@ fn main() {
 
         log::debug!("beginning normal operation...");
         let service = server::serve(args);
-        if service.is_err() {
-            log::error!("unable to run server: {}", service.unwrap_err());
+        if let Err(error) = service {
+            log::error!("unable to run server: {}", error);
             std::process::exit(4);
         }
     } else if args.is_present("client") {
@@ -286,8 +286,8 @@ fn main() {
 
         log::debug!("connecting to server...");
         let execution = client::execute(args);
-        if execution.is_err() {
-            log::error!("unable to run client: {}", execution.unwrap_err());
+        if let Err(error) = execution {
+            log::error!("unable to run client: {}", error);
             std::process::exit(4);
         }
     } else {

@@ -49,6 +49,11 @@ use crate::stream::tcp;
 use crate::stream::udp;
 use crate::stream::TestStream;
 
+type IntervalResultChannel = (
+    std::sync::mpsc::Sender<Box<dyn IntervalResult + Sync + Send>>,
+    std::sync::mpsc::Receiver<Box<dyn IntervalResult + Sync + Send>>,
+);
+
 use std::error::Error;
 type BoxResult<T> = Result<T, Box<dyn Error>>;
 
@@ -165,7 +170,7 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
 
     //connect to the server
     let mut stream = connect_to_server(
-        &args.value_of("client").unwrap(),
+        args.value_of("client").unwrap(),
         &(args.value_of("port").unwrap().parse()?),
     )?;
     let server_addr = stream.peer_addr()?;
@@ -175,59 +180,49 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
     let mut parallel_streams: Vec<Arc<Mutex<dyn TestStream + Sync + Send>>> =
         Vec::with_capacity(stream_count);
     let mut parallel_streams_joinhandles = Vec::with_capacity(stream_count);
-    let (results_tx, results_rx): (
-        std::sync::mpsc::Sender<Box<dyn IntervalResult + Sync + Send>>,
-        std::sync::mpsc::Receiver<Box<dyn IntervalResult + Sync + Send>>,
-    ) = channel();
+    let (results_tx, results_rx): IntervalResultChannel = channel();
 
     let test_results: Mutex<Box<dyn TestResults>> =
         prepare_test_results(is_udp, stream_count as u8);
 
     //a closure used to pass results from stream-handlers to the test-result structure
     let mut results_handler = || -> BoxResult<()> {
-        loop {
-            //drain all results every time this closer is invoked
-            match results_rx.try_recv() {
-                //see if there's a result to pass on
-                Ok(result) => {
-                    if !display_json {
-                        //since this runs in the main thread, which isn't involved in any testing, render things immediately
-                        println!("{}", result.to_string(display_bit));
+        //drain all results every time this closer is invoked
+        while let Ok(result) = results_rx.try_recv() {
+            //see if there's a result to pass on
+            if !display_json {
+                //since this runs in the main thread, which isn't involved in any testing, render things immediately
+                println!("{}", result.to_string(display_bit));
+            }
+
+            //update the test-results accordingly
+            let mut tr = test_results.lock().unwrap();
+            match result.kind() {
+                IntervalResultKind::ClientDone | IntervalResultKind::ClientFailed => {
+                    if result.kind() == IntervalResultKind::ClientDone {
+                        log::info!("stream {} is done", result.get_stream_idx());
+                    } else {
+                        log::warn!("stream {} failed", result.get_stream_idx());
                     }
+                    tr.mark_stream_done(
+                        &result.get_stream_idx(),
+                        result.kind() == IntervalResultKind::ClientDone,
+                    );
+                    if tr.count_in_progress_streams() == 0 {
+                        complete = true;
 
-                    //update the test-results accordingly
-                    let mut tr = test_results.lock().unwrap();
-                    match result.kind() {
-                        IntervalResultKind::ClientDone | IntervalResultKind::ClientFailed => {
-                            if result.kind() == IntervalResultKind::ClientDone {
-                                log::info!("stream {} is done", result.get_stream_idx());
-                            } else {
-                                log::warn!("stream {} failed", result.get_stream_idx());
-                            }
-                            tr.mark_stream_done(
-                                &result.get_stream_idx(),
-                                result.kind() == IntervalResultKind::ClientDone,
-                            );
-                            if tr.count_in_progress_streams() == 0 {
-                                complete = true;
-
-                                if tr.count_in_progress_streams_server() > 0 {
-                                    log::info!(
-                                        "giving the server a few seconds to report results..."
-                                    );
-                                    start_kill_timer();
-                                } else {
-                                    //all data gathered from both sides
-                                    kill();
-                                }
-                            }
-                        }
-                        _ => {
-                            tr.update_from_json(result.to_json())?;
+                        if tr.count_in_progress_streams_server() > 0 {
+                            log::info!("giving the server a few seconds to report results...");
+                            start_kill_timer();
+                        } else {
+                            //all data gathered from both sides
+                            kill();
                         }
                     }
                 }
-                Err(_) => break, //whether it's empty or disconnected, there's nothing to do
+                _ => {
+                    tr.update_from_json(result.to_json())?;
+                }
             }
         }
         Ok(())
@@ -403,7 +398,7 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
         //begin the test-streams
         for (stream_idx, parallel_stream) in parallel_streams.iter_mut().enumerate() {
             log::info!("beginning execution of stream {}...", stream_idx);
-            let c_ps = Arc::clone(&parallel_stream);
+            let c_ps = Arc::clone(parallel_stream);
             let c_results_tx = results_tx.clone();
             let c_cam = cpu_affinity_manager.clone();
             let handle = thread::spawn(move || {
