@@ -364,3 +364,201 @@ pub fn prepare_download_configuration(
         ))
     }
 }
+
+//AI-generated tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_ID: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+
+    #[test]
+    fn simple_messages_have_expected_shape() {
+        assert_eq!(prepare_begin(), serde_json::json!({"kind": "begin"}));
+        assert_eq!(
+            prepare_connect_ready(),
+            serde_json::json!({"kind": "connect-ready"})
+        );
+        assert_eq!(prepare_end(), serde_json::json!({"kind": "end"}));
+        assert_eq!(
+            prepare_connect(&[5199, 5200]),
+            serde_json::json!({"kind": "connect", "stream_ports": [5199, 5200]})
+        );
+    }
+
+    fn upload_args<'a>(extra: &'a [&'a str]) -> clap::ArgMatches<'a> {
+        let mut argv: Vec<&str> = vec!["rperf-test"];
+        argv.extend_from_slice(extra);
+        clap::App::new("rperf-test")
+            .arg(
+                clap::Arg::with_name("parallel")
+                    .takes_value(true)
+                    .short("P")
+                    .default_value("1"),
+            )
+            .arg(
+                clap::Arg::with_name("time")
+                    .takes_value(true)
+                    .default_value("10.0"),
+            )
+            .arg(
+                clap::Arg::with_name("send_interval")
+                    .takes_value(true)
+                    .long("send_interval")
+                    .default_value("0.05"),
+            )
+            .arg(
+                clap::Arg::with_name("length")
+                    .takes_value(true)
+                    .default_value("0"),
+            )
+            .arg(
+                clap::Arg::with_name("send_buffer")
+                    .takes_value(true)
+                    .long("send_buffer")
+                    .default_value("0"),
+            )
+            .arg(
+                clap::Arg::with_name("bandwidth")
+                    .takes_value(true)
+                    .short("b")
+                    .default_value("125000"),
+            )
+            .arg(clap::Arg::with_name("udp").takes_value(false).long("udp"))
+            .arg(
+                clap::Arg::with_name("no_delay")
+                    .takes_value(false)
+                    .short("N"),
+            )
+            .get_matches_from(argv)
+    }
+
+    #[test]
+    fn tcp_upload_configuration_defaults() {
+        let config = prepare_upload_configuration(&upload_args(&[]), &TEST_ID).unwrap();
+
+        assert_eq!(config["kind"], "configuration");
+        assert_eq!(config["family"], "tcp");
+        assert_eq!(config["role"], "upload");
+        assert_eq!(config["test_id"], serde_json::json!(TEST_ID.to_vec()));
+        assert_eq!(config["streams"], 1);
+        assert_eq!(config["bandwidth"], 125000);
+        //TCP defaults to a 32 kibibyte buffer
+        assert_eq!(config["length"], 32 * 1024);
+        assert_eq!(config["no_delay"], false);
+    }
+
+    #[test]
+    fn udp_upload_configuration_defaults() {
+        let config = prepare_upload_configuration(&upload_args(&["--udp"]), &TEST_ID).unwrap();
+
+        assert_eq!(config["family"], "udp");
+        //UDP defaults to a 1024 byte buffer
+        assert_eq!(config["length"], 1024);
+    }
+
+    #[test]
+    fn bandwidth_suffixes_parse_to_bytes_per_second() {
+        //kilobit, kilobyte, megabit, megabyte, gigabit, gigabyte, and plain bytes
+        let cases: &[(&str, u64)] = &[
+            ("1k", 125),
+            ("1K", 1000),
+            ("1m", 125000),
+            ("1M", 1_000_000),
+            ("1g", 125_000_000),
+            ("1G", 1_000_000_000),
+            ("500000", 500000),
+        ];
+        for (input, expected) in cases {
+            let config =
+                prepare_upload_configuration(&upload_args(&["-b", input]), &TEST_ID).unwrap();
+            assert_eq!(config["bandwidth"], *expected, "bandwidth input: {}", input);
+        }
+    }
+
+    #[test]
+    fn invalid_bandwidth_falls_back_to_one_mbps() {
+        let config = prepare_upload_configuration(&upload_args(&["-b", "abc"]), &TEST_ID).unwrap();
+        assert_eq!(config["bandwidth"], 125000);
+    }
+
+    #[test]
+    fn undersized_send_buffer_is_doubled() {
+        //requested buffer is too small for the 32 kibibyte TCP default, so it becomes length * 2
+        let config =
+            prepare_upload_configuration(&upload_args(&["--send_buffer", "100"]), &TEST_ID)
+                .unwrap();
+        assert_eq!(config["send_buffer"], 64 * 1024);
+    }
+
+    #[test]
+    fn no_delay_flag_is_honoured() {
+        let config = prepare_upload_configuration(&upload_args(&["-N"]), &TEST_ID).unwrap();
+        assert_eq!(config["no_delay"], true);
+    }
+
+    #[test]
+    fn out_of_range_send_interval_is_clamped() {
+        let config =
+            prepare_upload_configuration(&upload_args(&["--send_interval", "2.0"]), &TEST_ID)
+                .unwrap();
+        //f32 serialisation isn't exact, so allow a small tolerance
+        assert!((config["send_interval"].as_f64().unwrap() - 0.05).abs() < 1e-6);
+    }
+
+    fn download_args<'a>(extra: &'a [&'a str]) -> clap::ArgMatches<'a> {
+        let mut argv: Vec<&str> = vec!["rperf-test"];
+        argv.extend_from_slice(extra);
+        clap::App::new("rperf-test")
+            .arg(
+                clap::Arg::with_name("parallel")
+                    .takes_value(true)
+                    .short("P")
+                    .default_value("1"),
+            )
+            .arg(
+                clap::Arg::with_name("length")
+                    .takes_value(true)
+                    .default_value("0"),
+            )
+            .arg(
+                clap::Arg::with_name("receive_buffer")
+                    .takes_value(true)
+                    .long("receive_buffer")
+                    .default_value("0"),
+            )
+            .arg(clap::Arg::with_name("udp").takes_value(false).long("udp"))
+            .get_matches_from(argv)
+    }
+
+    #[test]
+    fn tcp_download_configuration_defaults() {
+        let config = prepare_download_configuration(&download_args(&[]), &TEST_ID).unwrap();
+
+        assert_eq!(config["family"], "tcp");
+        assert_eq!(config["role"], "download");
+        assert_eq!(config["length"], 32 * 1024);
+    }
+
+    #[test]
+    fn udp_download_configuration_defaults() {
+        let config = prepare_download_configuration(&download_args(&["--udp"]), &TEST_ID).unwrap();
+
+        assert_eq!(config["family"], "udp");
+        assert_eq!(config["length"], 1024);
+    }
+
+    #[test]
+    fn undersized_receive_buffer_is_doubled() {
+        let config =
+            prepare_download_configuration(&download_args(&["--receive_buffer", "100"]), &TEST_ID)
+                .unwrap();
+        assert_eq!(config["receive_buffer"], 64 * 1024);
+    }
+
+    #[test]
+    fn zero_streams_default_to_one() {
+        let config = prepare_upload_configuration(&upload_args(&["-P", "0"]), &TEST_ID).unwrap();
+        assert_eq!(config["streams"], 1);
+    }
+}

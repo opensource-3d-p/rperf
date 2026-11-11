@@ -836,3 +836,74 @@ pub mod sender {
         }
     }
 }
+
+//AI-generated tests
+#[cfg(test)]
+mod tests {
+    use super::{UdpTestDefinition, TEST_HEADER_SIZE, TRACER_MAGIC, TRACER_SIZE};
+
+    #[test]
+    fn tracer_layout_constants_are_consistent() {
+        //4 bytes of magic + 16 bytes of test ID + 1 byte of stream index
+        assert_eq!(TRACER_SIZE, 4 + 16 + 1);
+        assert_eq!(TRACER_MAGIC, *b"RNAT");
+    }
+
+    #[test]
+    fn test_definition_parses_full_payload() {
+        let test_id: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let details = serde_json::json!({
+            "test_id": test_id.to_vec(),
+            "bandwidth": 125000.0,
+            "length": 1024,
+        });
+
+        let definition = UdpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id, test_id);
+        assert_eq!(definition.bandwidth, 125000);
+        assert_eq!(definition.length, 1024);
+    }
+
+    #[test]
+    fn test_definition_truncates_oversized_test_id() {
+        //malicious data with more than 16 bytes must not cause an out-of-bounds access
+        let details = serde_json::json!({
+            "test_id": (0..20).collect::<Vec<u8>>(),
+            "length": TEST_HEADER_SIZE,
+        });
+
+        let definition = UdpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id, (0..16).collect::<Vec<u8>>().as_slice());
+    }
+
+    #[test]
+    fn test_definition_zero_pads_short_test_id() {
+        let details = serde_json::json!({
+            "test_id": vec![1, 2, 3],
+            "length": TEST_HEADER_SIZE,
+        });
+
+        let definition = UdpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id[0..3], [1, 2, 3]);
+        assert!(definition.test_id[3..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn test_definition_defaults_missing_fields() {
+        let details = serde_json::json!({});
+
+        let definition = UdpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id, [0_u8; 16]);
+        assert_eq!(definition.bandwidth, 0);
+        assert_eq!(definition.length, TEST_HEADER_SIZE);
+    }
+
+    #[test]
+    fn test_definition_rejects_too_short_length() {
+        let details = serde_json::json!({
+            "length": TEST_HEADER_SIZE - 1,
+        });
+
+        assert!(UdpTestDefinition::new(&details).is_err());
+    }
+}

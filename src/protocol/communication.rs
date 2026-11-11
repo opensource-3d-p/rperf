@@ -214,3 +214,67 @@ pub fn receive(
     log::debug!("awaiting payload from {}...", stream.peer_addr()?);
     receive_payload(&mut stream, alive_check, results_handler, length)
 }
+
+//AI-generated tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    fn loopback_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _addr) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn send_receive_roundtrip() {
+        let (mut sender, mut receiver) = loopback_pair();
+        let message = serde_json::json!({"kind": "begin"});
+
+        send(&mut sender, &message).unwrap();
+
+        let mut results_handler = || -> BoxResult<()> { Ok(()) };
+        let received = receive(&mut receiver, || true, &mut results_handler).unwrap();
+        assert_eq!(received, message);
+    }
+
+    #[test]
+    fn framing_preserves_multiple_messages() {
+        let (mut sender, mut receiver) = loopback_pair();
+        let first = serde_json::json!({"kind": "connect", "stream_ports": [1, 2]});
+        let second = serde_json::json!({"kind": "end"});
+
+        send(&mut sender, &first).unwrap();
+        send(&mut sender, &second).unwrap();
+
+        let mut results_handler = || -> BoxResult<()> { Ok(()) };
+        assert_eq!(
+            receive(&mut receiver, || true, &mut results_handler).unwrap(),
+            first
+        );
+        assert_eq!(
+            receive(&mut receiver, || true, &mut results_handler).unwrap(),
+            second
+        );
+    }
+
+    #[test]
+    fn framing_handles_large_payloads() {
+        let (mut sender, mut receiver) = loopback_pair();
+        let message = serde_json::json!({
+            "kind": "configuration",
+            "data": vec!["rperf"; 1024],
+        });
+
+        send(&mut sender, &message).unwrap();
+
+        let mut results_handler = || -> BoxResult<()> { Ok(()) };
+        assert_eq!(
+            receive(&mut receiver, || true, &mut results_handler).unwrap(),
+            message
+        );
+    }
+}

@@ -814,3 +814,67 @@ pub mod sender {
         }
     }
 }
+
+//AI-generated tests
+#[cfg(test)]
+mod tests {
+    use super::{TcpTestDefinition, TEST_HEADER_SIZE};
+
+    #[test]
+    fn test_definition_parses_full_payload() {
+        let test_id: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let details = serde_json::json!({
+            "test_id": test_id.to_vec(),
+            "bandwidth": 125000.0,
+            "length": 4096,
+        });
+
+        let definition = TcpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id, test_id);
+        assert_eq!(definition.bandwidth, 125000);
+        assert_eq!(definition.length, 4096);
+    }
+
+    #[test]
+    fn test_definition_truncates_oversized_test_id() {
+        //malicious data with more than 16 bytes must not cause an out-of-bounds access
+        let details = serde_json::json!({
+            "test_id": (0..20).collect::<Vec<u8>>(),
+            "length": TEST_HEADER_SIZE,
+        });
+
+        let definition = TcpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id, (0..16).collect::<Vec<u8>>().as_slice());
+    }
+
+    #[test]
+    fn test_definition_zero_pads_short_test_id() {
+        let details = serde_json::json!({
+            "test_id": vec![1, 2, 3],
+            "length": TEST_HEADER_SIZE,
+        });
+
+        let definition = TcpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id[0..3], [1, 2, 3]);
+        assert!(definition.test_id[3..].iter().all(|b| *b == 0));
+    }
+
+    #[test]
+    fn test_definition_defaults_missing_fields() {
+        let details = serde_json::json!({});
+
+        let definition = TcpTestDefinition::new(&details).unwrap();
+        assert_eq!(definition.test_id, [0_u8; 16]);
+        assert_eq!(definition.bandwidth, 0);
+        assert_eq!(definition.length, TEST_HEADER_SIZE);
+    }
+
+    #[test]
+    fn test_definition_rejects_too_short_length() {
+        let details = serde_json::json!({
+            "length": TEST_HEADER_SIZE - 1,
+        });
+
+        assert!(TcpTestDefinition::new(&details).is_err());
+    }
+}

@@ -64,3 +64,47 @@ fn parse_port_spec(port_spec: String) -> Vec<u16> {
 
     return ports;
 }
+
+//AI-generated tests
+#[cfg(test)]
+mod tests {
+    use super::parse_port_spec;
+
+    #[test]
+    fn empty_spec_yields_no_ports() {
+        assert_eq!(parse_port_spec(String::new()), Vec::<u16>::new());
+    }
+
+    #[test]
+    fn single_port() {
+        assert_eq!(parse_port_spec("5199".into()), vec![5199]);
+    }
+
+    #[test]
+    fn multiple_ports_are_sorted() {
+        assert_eq!(
+            parse_port_spec("5201,5197,5199".into()),
+            vec![5197, 5199, 5201]
+        );
+    }
+
+    #[test]
+    fn port_range_expands() {
+        assert_eq!(parse_port_spec("5197-5199".into()), vec![5197, 5198, 5199]);
+    }
+
+    #[test]
+    fn mixed_ranges_and_ports_are_sorted() {
+        assert_eq!(
+            parse_port_spec("5201,5197-5198".into()),
+            vec![5197, 5198, 5201]
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn non_numeric_spec_panics() {
+        //parse_port_spec uses unwraps internally; malformed specs are expected to be caught upstream
+        let _ = parse_port_spec("abc".into());
+    }
+}

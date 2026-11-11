@@ -31,7 +31,7 @@ type BoxResult<T> = Result<T, Box<dyn Error>>;
  * it isn't extensively documented.
  */
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum IntervalResultKind {
     ClientDone,
     ClientFailed,
@@ -1416,5 +1416,418 @@ impl TestResults for UdpTestResults {
         }
 
         output
+    }
+}
+
+//AI-generated tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tcp_receive(timestamp: f64, stream_idx: u8, duration: f32, bytes: u64) -> TcpReceiveResult {
+        TcpReceiveResult {
+            timestamp,
+            stream_idx,
+            duration,
+            bytes_received: bytes,
+        }
+    }
+
+    fn tcp_send(timestamp: f64, stream_idx: u8, duration: f32, bytes: u64) -> TcpSendResult {
+        TcpSendResult {
+            timestamp,
+            stream_idx,
+            duration,
+            bytes_sent: bytes,
+            sends_blocked: 0,
+        }
+    }
+
+    fn udp_send(
+        timestamp: f64,
+        stream_idx: u8,
+        duration: f32,
+        bytes: u64,
+        packets: u64,
+    ) -> UdpSendResult {
+        UdpSendResult {
+            timestamp,
+            stream_idx,
+            duration,
+            bytes_sent: bytes,
+            packets_sent: packets,
+            sends_blocked: 0,
+        }
+    }
+
+    fn udp_receive(
+        timestamp: f64,
+        stream_idx: u8,
+        duration: f32,
+        bytes: u64,
+        packets: u64,
+        jitter: Option<f32>,
+    ) -> UdpReceiveResult {
+        UdpReceiveResult {
+            timestamp,
+            stream_idx,
+            duration,
+            bytes_received: bytes,
+            packets_received: packets,
+            packets_lost: 0,
+            packets_out_of_order: 0,
+            packets_duplicated: 0,
+            unbroken_sequence: packets,
+            jitter_seconds: jitter,
+        }
+    }
+
+    #[test]
+    fn result_json_roundtrips() {
+        let receive = tcp_receive(1.0, 3, 1.0, 1000);
+        let roundtripped = interval_result_from_json(receive.to_json()).unwrap();
+        assert_eq!(roundtripped.kind(), IntervalResultKind::TcpReceive);
+        assert_eq!(roundtripped.get_stream_idx(), 3);
+        assert_eq!(roundtripped.to_json()["bytes_received"], 1000);
+
+        let send = tcp_send(2.0, 0, 1.0, 2000);
+        let roundtripped = interval_result_from_json(send.to_json()).unwrap();
+        assert_eq!(roundtripped.kind(), IntervalResultKind::TcpSend);
+        assert_eq!(roundtripped.get_stream_idx(), 0);
+
+        let udp_rx = udp_receive(3.0, 1, 1.0, 4096, 4, Some(0.001));
+        let roundtripped = interval_result_from_json(udp_rx.to_json()).unwrap();
+        assert_eq!(roundtripped.kind(), IntervalResultKind::UdpReceive);
+        assert_eq!(roundtripped.to_json()["packets_received"], 4);
+
+        let udp_tx = udp_send(4.0, 2, 1.0, 8192, 8);
+        let roundtripped = interval_result_from_json(udp_tx.to_json()).unwrap();
+        assert_eq!(roundtripped.kind(), IntervalResultKind::UdpSend);
+    }
+
+    #[test]
+    fn interval_result_rejects_malformed_input() {
+        //no family
+        assert!(interval_result_from_json(serde_json::json!({})).is_err());
+        //unknown family
+        assert!(interval_result_from_json(serde_json::json!({
+            "family": "sctp",
+            "kind": "receive",
+        }))
+        .is_err());
+        //no kind
+        assert!(interval_result_from_json(serde_json::json!({
+            "family": "tcp",
+        }))
+        .is_err());
+        //unknown kind
+        assert!(interval_result_from_json(serde_json::json!({
+            "family": "tcp",
+            "kind": "other",
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn udp_send_result_tolerates_missing_sends_blocked() {
+        //pre-0.1.8 peers don't report sends_blocked
+        let mut value = udp_send(1.0, 0, 1.0, 1024, 1).to_json();
+        value.as_object_mut().unwrap().remove("sends_blocked");
+
+        let result = UdpSendResult::from_json(value).unwrap();
+        assert_eq!(result.sends_blocked, 0);
+    }
+
+    #[test]
+    fn result_json_omits_stream_index() {
+        //per-interval entries are grouped under their stream, so the index must not be repeated
+        assert!(tcp_receive(1.0, 5, 1.0, 10)
+            .to_result_json()
+            .get("stream_idx")
+            .is_none());
+        assert!(tcp_send(1.0, 5, 1.0, 10)
+            .to_result_json()
+            .get("stream_idx")
+            .is_none());
+        assert!(udp_receive(1.0, 5, 1.0, 10, 1, None)
+            .to_result_json()
+            .get("stream_idx")
+            .is_none());
+        assert!(udp_send(1.0, 5, 1.0, 10, 1)
+            .to_result_json()
+            .get("stream_idx")
+            .is_none());
+    }
+
+    #[test]
+    fn receive_result_to_string_handles_zero_duration() {
+        //a failed stream can report a zero duration; this must not divide by zero
+        let result = tcp_receive(1.0, 0, 0.0, 0);
+        let output = result.to_string(true);
+        assert!(output.contains("TCP receive result"));
+        assert!(output.contains("per second: 0.000"));
+    }
+
+    #[test]
+    fn receive_result_to_string_reports_throughput() {
+        //1 megabyte/second is 8 megabits/second
+        let output = tcp_receive(1.0, 0, 1.0, 1_000_000).to_string(true);
+        assert!(output.contains("megabits/second: 8.000"));
+
+        let output = tcp_receive(1.0, 0, 1.0, 1_000_000).to_string(false);
+        assert!(output.contains("megabytes/second: 1.000"));
+    }
+
+    #[test]
+    fn tcp_test_results_lifecycle() {
+        let mut results = TcpTestResults::new();
+        assert!(results.is_success());
+        assert_eq!(results.count_in_progress_streams(), 0);
+
+        results.prepare_index(&0);
+        results.prepare_index(&1);
+        assert_eq!(results.count_in_progress_streams(), 2);
+        assert!(!results.is_success());
+
+        //server-side accounting tracks the same indices
+        assert_eq!(results.count_in_progress_streams_server(), 2);
+        results.mark_stream_done_server(&0);
+        assert_eq!(results.count_in_progress_streams_server(), 1);
+
+        results.mark_stream_done(&0, true);
+        assert!(!results.is_success());
+        results.mark_stream_done(&1, true);
+        assert!(results.is_success());
+    }
+
+    #[test]
+    fn tcp_test_results_tracks_failures() {
+        let mut results = TcpTestResults::new();
+        results.prepare_index(&0);
+        results.mark_stream_done(&0, false);
+        assert!(!results.is_success());
+    }
+
+    #[test]
+    fn tcp_test_results_accepts_and_summarises_intervals() {
+        let mut results = TcpTestResults::new();
+        results.prepare_index(&0);
+
+        results
+            .update_from_json(serde_json::json!({
+                "family": "tcp",
+                "kind": "send",
+                "stream_idx": 0,
+                "timestamp": 1.0,
+                "duration": 1.0,
+                "bytes_sent": 1000,
+                "sends_blocked": 0,
+            }))
+            .unwrap();
+        results
+            .update_from_json(serde_json::json!({
+                "family": "tcp",
+                "kind": "receive",
+                "stream_idx": 0,
+                "timestamp": 1.0,
+                "duration": 1.0,
+                "bytes_received": 900,
+            }))
+            .unwrap();
+
+        //unknown stream-indices are rejected
+        let unknown = serde_json::json!({
+            "family": "tcp",
+            "kind": "receive",
+            "stream_idx": 7,
+            "timestamp": 1.0,
+            "duration": 1.0,
+            "bytes_received": 1,
+        });
+        assert!(results.update_from_json(unknown).is_err());
+
+        results.mark_stream_done(&0, true);
+        let output = results.to_json(
+            0,
+            serde_json::json!({"upload": true}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+        );
+
+        assert_eq!(output["success"], true);
+        assert_eq!(output["summary"]["bytes_sent"], 1000);
+        assert_eq!(output["summary"]["bytes_received"], 900);
+        assert_eq!(output["summary"]["duration_send"], 1.0);
+        assert_eq!(
+            output["config"]["upload"],
+            serde_json::json!({"upload": true})
+        );
+        assert_eq!(output["streams"].as_array().unwrap().len(), 1);
+        let stream = &output["streams"][0];
+        assert_eq!(stream["abandoned"], false);
+        assert_eq!(stream["failed"], false);
+        assert_eq!(stream["intervals"]["send"].as_array().unwrap().len(), 1);
+        assert_eq!(stream["intervals"]["receive"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn tcp_test_results_omit_seconds_excludes_early_intervals() {
+        let mut results = TcpTestResults::new();
+        results.prepare_index(&0);
+        for i in 0..3 {
+            results
+                .update_from_json(serde_json::json!({
+                    "family": "tcp",
+                    "kind": "send",
+                    "stream_idx": 0,
+                    "timestamp": f64::from(i),
+                    "duration": 1.0,
+                    "bytes_sent": 1000,
+                    "sends_blocked": 0,
+                }))
+                .unwrap();
+        }
+        results.mark_stream_done(&0, true);
+
+        let output = results.to_json(
+            1,
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+        );
+        //only 2 of the 3 intervals are counted in the summary
+        assert_eq!(output["summary"]["bytes_sent"], 2000);
+        assert_eq!(output["summary"]["duration_send"], 2.0);
+    }
+
+    #[test]
+    fn udp_test_results_lifecycle() {
+        let mut results = UdpTestResults::new();
+        assert!(results.is_success());
+
+        results.prepare_index(&0);
+        results.prepare_index(&1);
+        assert_eq!(results.count_in_progress_streams(), 2);
+
+        results.mark_stream_done(&0, true);
+        results.mark_stream_done(&1, false);
+        assert!(!results.is_success());
+    }
+
+    #[test]
+    fn udp_test_results_summarise_losses_and_jitter() {
+        let mut results = UdpTestResults::new();
+        results.prepare_index(&0);
+
+        results
+            .update_from_json(serde_json::json!({
+                "family": "udp",
+                "kind": "send",
+                "stream_idx": 0,
+                "timestamp": 1.0,
+                "duration": 1.0,
+                "bytes_sent": 2048,
+                "packets_sent": 2,
+                "sends_blocked": 0,
+            }))
+            .unwrap();
+        //the first interval has no jitter, the second does
+        results
+            .update_from_json(serde_json::json!({
+                "family": "udp",
+                "kind": "receive",
+                "stream_idx": 0,
+                "timestamp": 1.0,
+                "duration": 1.0,
+                "bytes_received": 1024,
+                "packets_received": 1,
+                "packets_lost": 0,
+                "packets_out_of_order": 0,
+                "packets_duplicated": 0,
+                "unbroken_sequence": 1,
+                "jitter_seconds": null,
+            }))
+            .unwrap();
+        results
+            .update_from_json(serde_json::json!({
+                "family": "udp",
+                "kind": "receive",
+                "stream_idx": 0,
+                "timestamp": 2.0,
+                "duration": 1.0,
+                "bytes_received": 1024,
+                "packets_received": 1,
+                "packets_lost": 1,
+                "packets_out_of_order": 0,
+                "packets_duplicated": 0,
+                "unbroken_sequence": 10,
+                "jitter_seconds": 0.1,
+            }))
+            .unwrap();
+
+        results.mark_stream_done(&0, true);
+        let output = results.to_json(
+            0,
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+        );
+
+        let summary = &output["summary"];
+        assert_eq!(summary["packets_sent"], 2);
+        assert_eq!(summary["packets_received"], 2);
+        //loss is calculated as sent minus received
+        assert_eq!(summary["packets_lost"], 0);
+        assert_eq!(summary["framed_packet_size"], 1024);
+        //jitter is weighted by the length of unbroken sequences
+        assert!((summary["jitter_average"].as_f64().unwrap() - 0.1).abs() < 1e-6);
+        assert_eq!(summary["jitter_packets_consecutive"], 10);
+    }
+
+    #[test]
+    fn udp_test_results_omit_jitter_fields_when_not_calculated() {
+        let mut results = UdpTestResults::new();
+        results.prepare_index(&0);
+        results
+            .update_from_json(serde_json::json!({
+                "family": "udp",
+                "kind": "send",
+                "stream_idx": 0,
+                "timestamp": 1.0,
+                "duration": 1.0,
+                "bytes_sent": 1024,
+                "packets_sent": 1,
+                "sends_blocked": 0,
+            }))
+            .unwrap();
+        results
+            .update_from_json(serde_json::json!({
+                "family": "udp",
+                "kind": "receive",
+                "stream_idx": 0,
+                "timestamp": 1.0,
+                "duration": 1.0,
+                "bytes_received": 1024,
+                "packets_received": 1,
+                "packets_lost": 0,
+                "packets_out_of_order": 0,
+                "packets_duplicated": 0,
+                "unbroken_sequence": 1,
+                "jitter_seconds": null,
+            }))
+            .unwrap();
+        results.mark_stream_done(&0, true);
+
+        let output = results.to_json(
+            0,
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+        );
+        assert!(output["summary"].get("jitter_average").is_none());
     }
 }
