@@ -47,6 +47,12 @@ pub fn send(stream: &mut TcpStream, message: &serde_json::Value) -> BoxResult<()
         .expect("unable to set TCP write-timeout");
 
     let serialised_message = serde_json::to_vec(message)?;
+    if serialised_message.len() > u16::MAX as usize {
+        return Err(Box::new(simple_error::simple_error!(
+            "message of {} bytes exceeds the 65535-byte protocol limit",
+            serialised_message.len()
+        )));
+    }
 
     log::debug!(
         "sending message of length {}, {:?}, to {}...",
@@ -275,6 +281,23 @@ mod tests {
         assert_eq!(
             receive(&mut receiver, || true, &mut results_handler).unwrap(),
             message
+        );
+    }
+
+    #[test]
+    fn send_rejects_oversized_messages() {
+        let (mut sender, _receiver) = loopback_pair();
+        //anything over 65535 bytes can't fit in the u16 length-prefix
+        let message = serde_json::json!({
+            "kind": "configuration",
+            "data": vec!["rperf"; 12_000],
+        });
+
+        let err = send(&mut sender, &message).unwrap_err().to_string();
+        assert!(
+            err.contains("exceeds the 65535-byte protocol limit"),
+            "unexpected error: {}",
+            err
         );
     }
 }

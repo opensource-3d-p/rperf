@@ -710,7 +710,8 @@ impl StreamResults for UdpStreamResults {
 
             "bytes_received": bytes_received,
             "packets_received": packets_received,
-            "packets_lost": packets_sent - packets_received,
+            //packets_received includes duplicates
+            "packets_lost": packets_sent.saturating_sub(packets_received.saturating_sub(packets_duplicated)),
             "packets_out_of_order": packets_out_of_order,
             "packets_duplicated": packets_duplicated,
         });
@@ -1034,14 +1035,14 @@ impl TestResults for TcpTestResults {
                                   TCP receive result over {:.2}s | streams: {}\n\
                                   stream-average bytes per second: {:.3} | {}\n\
                                   total bytes: {} | per second: {:.3} | {}",
-            stream_send_durations[stream_send_durations.len() - 1],
+            stream_send_durations.last().copied().unwrap_or(0.0),
             stream_count,
             send_bytes_per_second,
             send_throughput,
             bytes_sent,
             send_bytes_per_second * stream_count as f64,
             total_send_throughput,
-            stream_receive_durations[stream_receive_durations.len() - 1],
+            stream_receive_durations.last().copied().unwrap_or(0.0),
             stream_count,
             receive_bytes_per_second,
             receive_throughput,
@@ -1226,7 +1227,8 @@ impl TestResults for UdpTestResults {
 
             "bytes_received": bytes_received,
             "packets_received": packets_received,
-            "packets_lost": packets_sent - packets_received,
+            //packets_received includes duplicates
+            "packets_lost": packets_sent.saturating_sub(packets_received.saturating_sub(packets_duplicated)),
             "packets_out_of_order": packets_out_of_order,
             "packets_duplicated": packets_duplicated,
         });
@@ -1373,7 +1375,8 @@ impl TestResults for UdpTestResults {
             ),
         };
 
-        let packets_lost = packets_sent - (packets_received - packets_duplicated);
+        let packets_lost =
+            packets_sent.saturating_sub(packets_received.saturating_sub(packets_duplicated));
         let packets_sent_divisor;
         if packets_sent == 0 {
             //avoid zerodiv, which can happen if all streams fail
@@ -1391,12 +1394,12 @@ impl TestResults for UdpTestResults {
                                   stream-average bytes per second: {:.3} | {}\n\
                                   total bytes: {} | per second: {:.3} | {}\n\
                                   packets: {} | lost: {} ({:.1}%) | out-of-order: {} | duplicate: {} | per second: {:.3}",
-                                stream_send_durations[stream_send_durations.len() - 1], stream_count,
+                                stream_send_durations.last().copied().unwrap_or(0.0), stream_count,
                                 send_bytes_per_second, send_throughput,
                                 bytes_sent, send_bytes_per_second * stream_count as f64, total_send_throughput,
                                 packets_sent, (packets_sent as f64 / send_duration_divisor) * stream_count as f64,
 
-                                stream_receive_durations[stream_receive_durations.len() - 1], stream_count,
+                                stream_receive_durations.last().copied().unwrap_or(0.0), stream_count,
                                 receive_bytes_per_second, receive_throughput,
                                 bytes_received, receive_bytes_per_second * stream_count as f64, total_receive_throughput,
                                 packets_received, packets_lost, (packets_lost as f64 / packets_sent_divisor) * 100.0, packets_out_of_order, packets_duplicated, (packets_received as f64 / receive_duration_divisor) * stream_count as f64,
@@ -1503,6 +1506,49 @@ mod tests {
         let udp_tx = udp_send(4.0, 2, 1.0, 8192, 8);
         let roundtripped = interval_result_from_json(udp_tx.to_json()).unwrap();
         assert_eq!(roundtripped.kind(), IntervalResultKind::UdpSend);
+    }
+
+    #[test]
+    fn udp_summary_packets_lost_ignores_duplicates() {
+        //packets_received includes duplicates; if duplicates exceed the send count, a naive
+        //subtraction would underflow, so the summary must saturate at zero
+        let mut results = UdpTestResults::new();
+        results.prepare_index(&0);
+        results
+            .stream_results
+            .get_mut(&0)
+            .unwrap()
+            .receive_results
+            .push(UdpReceiveResult {
+                timestamp: 1.0,
+                stream_idx: 0,
+                duration: 1.0,
+                bytes_received: 204800,
+                packets_received: 200,
+                packets_lost: 0,
+                packets_out_of_order: 0,
+                packets_duplicated: 150,
+                unbroken_sequence: 50,
+                jitter_seconds: None,
+            });
+        results
+            .stream_results
+            .get_mut(&0)
+            .unwrap()
+            .send_results
+            .push(udp_send(1.0, 0, 1.0, 102400, 100));
+        results.mark_stream_done(&0, true);
+
+        let json = results.to_json(
+            0,
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+            serde_json::json!({}),
+        );
+        //100 sent, 200 received of which 150 are duplicates → 50 unique received, 50 lost;
+        //a naive subtraction (100 - 200) would underflow here
+        assert_eq!(json["summary"]["packets_lost"], 50);
     }
 
     #[test]

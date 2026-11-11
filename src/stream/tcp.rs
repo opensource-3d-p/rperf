@@ -107,22 +107,22 @@ pub mod receiver {
         lock_ip6: Mutex<u8>,
     }
     impl TcpPortPool {
-        pub fn new(port_spec: String, port_spec6: String) -> TcpPortPool {
-            let ports = super::parse_port_spec(port_spec);
+        pub fn new(port_spec: String, port_spec6: String) -> super::BoxResult<TcpPortPool> {
+            let ports = super::parse_port_spec(port_spec)?;
             if !ports.is_empty() {
                 log::debug!("configured IPv4 TCP port pool: {:?}", ports);
             } else {
                 log::debug!("using OS assignment for IPv4 TCP ports");
             }
 
-            let ports6 = super::parse_port_spec(port_spec6);
-            if !ports.is_empty() {
+            let ports6 = super::parse_port_spec(port_spec6)?;
+            if !ports6.is_empty() {
                 log::debug!("configured IPv6 TCP port pool: {:?}", ports6);
             } else {
                 log::debug!("using OS assignment for IPv6 TCP ports");
             }
 
-            TcpPortPool {
+            Ok(TcpPortPool {
                 ports_ip4: ports,
                 pos_ip4: 0,
                 lock_ip4: Mutex::new(0),
@@ -130,7 +130,7 @@ pub mod receiver {
                 ports_ip6: ports6,
                 pos_ip6: 0,
                 lock_ip6: Mutex::new(0),
-            }
+            })
         }
 
         pub fn bind(&mut self, peer_ip: &IpAddr) -> super::BoxResult<TcpListener> {
@@ -347,6 +347,9 @@ pub mod receiver {
                     let mut buf = vec![0_u8; self.test_definition.length];
                     let mut validated: bool = false;
                     let mut bytes_received: u64 = 0;
+                    //how many bytes have been read since the connection opened
+                    //to prevent a truncated prefix, the test-id is only validated once a full header's size has arrived
+                    let mut header_bytes: usize = 0;
 
                     let start_validation = Instant::now();
 
@@ -358,20 +361,24 @@ pub mod receiver {
                                 match unwrapped_stream.read(&mut buf) {
                                     Ok(packet_size) => {
                                         if !validated {
-                                            if buf[..16] == self.test_definition.test_id {
-                                                log::debug!(
-                                                    "validated TCP stream {} connection from {}",
-                                                    self.stream_idx,
-                                                    unwrapped_stream.peer_addr()?
-                                                );
-                                                validated = true;
-                                            } else {
-                                                log::warn!(
-                                                    "unexpected ID in stream {} connection from {}",
-                                                    self.stream_idx,
-                                                    unwrapped_stream.peer_addr()?
-                                                );
-                                                break;
+                                            header_bytes += packet_size;
+                                            if header_bytes >= crate::stream::tcp::TEST_HEADER_SIZE
+                                            {
+                                                if buf[..16] == self.test_definition.test_id {
+                                                    log::debug!(
+                                                        "validated TCP stream {} connection from {}",
+                                                        self.stream_idx,
+                                                        unwrapped_stream.peer_addr()?
+                                                    );
+                                                    validated = true;
+                                                } else {
+                                                    log::warn!(
+                                                        "unexpected ID in stream {} connection from {}",
+                                                        self.stream_idx,
+                                                        unwrapped_stream.peer_addr()?
+                                                    );
+                                                    break;
+                                                }
                                             }
                                         }
 
@@ -504,23 +511,32 @@ pub mod receiver {
                     self.stream_idx,
                     peer_addr
                 );
-                Some(Ok(Box::new(super::TcpReceiveResult {
-                    timestamp: super::get_unix_timestamp(),
-
-                    stream_idx: self.stream_idx,
-
-                    duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
-
-                    bytes_received: bytes_received,
-                })))
             } else {
                 log::debug!(
                     "no bytes received via TCP stream {} from {} in this interval",
                     self.stream_idx,
                     peer_addr
                 );
-                None
             }
+            if !self.active && bytes_received == 0 {
+                //the test ended (the sender closed the connection) and nothing was received
+                // in this interval; signal completion
+                return None;
+            }
+            //an empty interval while the test is still active is just a data gap; the sender only
+            // ends the test by closing the connection, so report the interval (data or a zero-byte
+            // gap) and keep going. If the connection closed in the same interval as data,
+            // bytes_received > 0, so that data is reported before the following empty interval ends
+            // the test
+            Some(Ok(Box::new(super::TcpReceiveResult {
+                timestamp: super::get_unix_timestamp(),
+
+                stream_idx: self.stream_idx,
+
+                duration: start.elapsed().as_secs_f32() + additional_time_elapsed,
+
+                bytes_received: bytes_received,
+            })))
         }
 
         fn get_port(&self) -> super::BoxResult<u16> {

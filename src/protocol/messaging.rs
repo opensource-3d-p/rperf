@@ -160,12 +160,20 @@ fn validate_streams(streams: u8) -> u8 {
     }
 }
 
+/// the default bandwidth target, in bytes/second (1 megabit/second),
+/// shared with the CLI so the two can't drift
+pub const DEFAULT_BANDWIDTH: u64 = 125000;
+
 fn validate_bandwidth(bandwidth: u64) -> u64 {
     if bandwidth > 0 {
         bandwidth
     } else {
-        log::warn!("bandwidth was not specified; defaulting to 1024 bytes/second");
-        1024
+        log::warn!(
+            "bandwidth was not specified; defaulting to {} bytes/second ({} megabit/second)",
+            DEFAULT_BANDWIDTH,
+            DEFAULT_BANDWIDTH / DEFAULT_BANDWIDTH,
+        );
+        DEFAULT_BANDWIDTH
     }
 }
 

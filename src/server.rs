@@ -289,6 +289,15 @@ fn handle_client(
                                     )?;
                                     parallel_streams.push(Arc::new(Mutex::new(test)));
                                 }
+
+                                //remove the entries consumed
+                                for stream_idx in 0..stream_ports.len() as u8 {
+                                    nat_port_map.lock().unwrap().remove(&(
+                                        peer_addr.ip(),
+                                        test_definition.test_id,
+                                        stream_idx,
+                                    ));
+                                }
                             } else {
                                 //TCP
                                 log::info!(
@@ -453,11 +462,11 @@ pub fn serve(args: ArgMatches) -> BoxResult<()> {
     let tcp_port_pool = Arc::new(Mutex::new(tcp::receiver::TcpPortPool::new(
         args.value_of("tcp_port_pool").unwrap().to_string(),
         args.value_of("tcp6_port_pool").unwrap().to_string(),
-    )));
+    )?));
     let udp_port_pool = Arc::new(Mutex::new(udp::receiver::UdpPortPool::new(
         args.value_of("udp_port_pool").unwrap().to_string(),
         args.value_of("udp6_port_pool").unwrap().to_string(),
-    )));
+    )?));
 
     let cpu_affinity_manager = Arc::new(Mutex::new(
         crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?,

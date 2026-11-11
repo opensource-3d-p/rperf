@@ -42,27 +42,53 @@ pub trait TestStream {
     fn stop(&mut self);
 }
 
-fn parse_port_spec(port_spec: String) -> Vec<u16> {
+fn parse_port_spec(port_spec: String) -> BoxResult<Vec<u16>> {
     let mut ports = Vec::<u16>::new();
     if !port_spec.is_empty() {
         for range in port_spec.split(',') {
             if range.contains('-') {
                 let mut range_spec = range.split('-');
-                let range_first = range_spec.next().unwrap().parse::<u16>().unwrap();
-                let range_last = range_spec.last().unwrap().parse::<u16>().unwrap();
+                let range_first = range_spec.next().ok_or(simple_error::simple_error!(
+                    "invalid port range '{}' in spec",
+                    range
+                ))?;
+                let range_last = range_spec.next().ok_or(simple_error::simple_error!(
+                    "invalid port range '{}' in spec",
+                    range
+                ))?;
+                if range_spec.next().is_some() {
+                    return Err(Box::new(simple_error::simple_error!(
+                        "invalid port range '{}' in spec",
+                        range
+                    )));
+                }
+                let range_first: u16 = range_first.parse().map_err(|_| {
+                    simple_error::simple_error!("invalid port range '{}' in spec", range)
+                })?;
+                let range_last: u16 = range_last.parse().map_err(|_| {
+                    simple_error::simple_error!("invalid port range '{}' in spec", range)
+                })?;
+                if range_first > range_last {
+                    return Err(Box::new(simple_error::simple_error!(
+                        "invalid port range '{}' in spec: start is greater than end",
+                        range
+                    )));
+                }
 
                 for port in range_first..=range_last {
                     ports.push(port);
                 }
             } else {
-                ports.push(range.parse::<u16>().unwrap());
+                ports.push(range.parse().map_err(|_| {
+                    simple_error::simple_error!("invalid port '{}' in spec", range)
+                })?);
             }
         }
 
         ports.sort();
     }
 
-    return ports;
+    Ok(ports)
 }
 
 //AI-generated tests
@@ -72,39 +98,50 @@ mod tests {
 
     #[test]
     fn empty_spec_yields_no_ports() {
-        assert_eq!(parse_port_spec(String::new()), Vec::<u16>::new());
+        assert_eq!(parse_port_spec(String::new()).unwrap(), Vec::<u16>::new());
     }
 
     #[test]
     fn single_port() {
-        assert_eq!(parse_port_spec("5199".into()), vec![5199]);
+        assert_eq!(parse_port_spec("5199".into()).unwrap(), vec![5199]);
     }
 
     #[test]
     fn multiple_ports_are_sorted() {
         assert_eq!(
-            parse_port_spec("5201,5197,5199".into()),
+            parse_port_spec("5201,5197,5199".into()).unwrap(),
             vec![5197, 5199, 5201]
         );
     }
 
     #[test]
     fn port_range_expands() {
-        assert_eq!(parse_port_spec("5197-5199".into()), vec![5197, 5198, 5199]);
+        assert_eq!(
+            parse_port_spec("5197-5199".into()).unwrap(),
+            vec![5197, 5198, 5199]
+        );
     }
 
     #[test]
     fn mixed_ranges_and_ports_are_sorted() {
         assert_eq!(
-            parse_port_spec("5201,5197-5198".into()),
+            parse_port_spec("5201,5197-5198".into()).unwrap(),
             vec![5197, 5198, 5201]
         );
     }
 
     #[test]
-    #[should_panic]
-    fn non_numeric_spec_panics() {
-        //parse_port_spec uses unwraps internally; malformed specs are expected to be caught upstream
-        let _ = parse_port_spec("abc".into());
+    fn malformed_specs_are_rejected() {
+        //non-numeric
+        assert!(parse_port_spec("abc".into()).is_err());
+        //dangling range bounds
+        assert!(parse_port_spec("5-".into()).is_err());
+        assert!(parse_port_spec("-5".into()).is_err());
+        //too many bounds
+        assert!(parse_port_spec("1-2-3".into()).is_err());
+        //reversed range
+        assert!(parse_port_spec("5199-5197".into()).is_err());
+        //out-of-range port
+        assert!(parse_port_spec("70000".into()).is_err());
     }
 }

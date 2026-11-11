@@ -30,6 +30,7 @@ mod stream;
 mod utils;
 
 fn main() {
+    let default_bandwidth = protocol::messaging::DEFAULT_BANDWIDTH.to_string();
     let args = App::new("rperf")
         .about(clap::crate_description!())
         .author("https://github.com/opensource-3d-p/rperf")
@@ -131,7 +132,7 @@ fn main() {
                 .long("bandwidth")
                 .short("b")
                 .required(false)
-                .default_value("125000")
+                .default_value(default_bandwidth.as_str())
         )
         .arg(
             Arg::with_name("time")

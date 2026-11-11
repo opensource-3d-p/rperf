@@ -116,22 +116,22 @@ pub mod receiver {
         lock_ip6: Mutex<u8>,
     }
     impl UdpPortPool {
-        pub fn new(port_spec: String, port_spec6: String) -> UdpPortPool {
-            let ports = super::parse_port_spec(port_spec);
+        pub fn new(port_spec: String, port_spec6: String) -> super::BoxResult<UdpPortPool> {
+            let ports = super::parse_port_spec(port_spec)?;
             if !ports.is_empty() {
                 log::debug!("configured IPv4 UDP port pool: {:?}", ports);
             } else {
                 log::debug!("using OS assignment for IPv4 UDP ports");
             }
 
-            let ports6 = super::parse_port_spec(port_spec6);
-            if !ports.is_empty() {
+            let ports6 = super::parse_port_spec(port_spec6)?;
+            if !ports6.is_empty() {
                 log::debug!("configured IPv6 UDP port pool: {:?}", ports6);
             } else {
                 log::debug!("using OS assignment for IPv6 UDP ports");
             }
 
-            UdpPortPool {
+            Ok(UdpPortPool {
                 ports_ip4: ports,
                 pos_ip4: 0,
                 lock_ip4: Mutex::new(0),
@@ -139,7 +139,7 @@ pub mod receiver {
                 ports_ip6: ports6,
                 pos_ip6: 0,
                 lock_ip6: Mutex::new(0),
-            }
+            })
         }
 
         pub fn bind(&mut self, peer_ip: &IpAddr) -> super::BoxResult<UdpSocket> {
@@ -261,6 +261,9 @@ pub mod receiver {
         test_definition: super::UdpTestDefinition,
         stream_idx: u8,
         next_packet_id: u64,
+        //a count of consecutive empty intervals; a transient data gap shouldn't end the test,
+        // but an extended one does, until an explicit end marker or stop
+        consecutive_empty_intervals: u32,
 
         socket: UdpSocket,
     }
@@ -298,6 +301,7 @@ pub mod receiver {
                 stream_idx: stream_idx.to_owned(),
 
                 next_packet_id: 0,
+                consecutive_empty_intervals: 0,
 
                 socket: socket,
             })
@@ -500,6 +504,7 @@ pub mod receiver {
                             }
 
                             if self.process_packet(&buf, &mut history) {
+                                self.consecutive_empty_intervals = 0;
                                 //NOTE: duplicate packets increase this count; this is intentional because the stack still processed data
                                 bytes_received +=
                                     packet_size as u64 + super::UDP_HEADER_SIZE as u64;
@@ -531,29 +536,48 @@ pub mod receiver {
                     bytes_received,
                     self.stream_idx
                 );
-                Some(Ok(Box::new(super::UdpReceiveResult {
-                    timestamp: super::get_unix_timestamp(),
-
-                    stream_idx: self.stream_idx,
-
-                    duration: start.elapsed().as_secs_f32(),
-
-                    bytes_received: bytes_received,
-                    packets_received: history.packets_received,
-                    packets_lost: history.packets_lost,
-                    packets_out_of_order: history.packets_out_of_order,
-                    packets_duplicated: history.packets_duplicated,
-
-                    unbroken_sequence: history.longest_unbroken_sequence,
-                    jitter_seconds: history.longest_jitter_seconds,
-                })))
             } else {
                 log::debug!(
                     "no bytes received via UDP stream {} in this interval",
                     self.stream_idx
                 );
-                None
             }
+            if !self.active && bytes_received == 0 {
+                //the test ended (end-marker received or stop() called) and nothing was received in
+                // this interval; signal completion
+                return None;
+            }
+            if bytes_received == 0 {
+                //a transient data gap; report a zero-byte interval and keep going until the gap
+                // runs long, since the sender only ends the test with an explicit marker.
+                //Note: if the end-marker arrived in the same interval as data, bytes_received > 0,
+                // so that data is still reported before the following empty interval ends the test
+                self.consecutive_empty_intervals += 1;
+                if self.consecutive_empty_intervals > 3 {
+                    log::debug!(
+                        "UDP stream {} received no data for {} consecutive intervals; ending...",
+                        self.stream_idx,
+                        self.consecutive_empty_intervals
+                    );
+                    return None;
+                }
+            }
+            Some(Ok(Box::new(super::UdpReceiveResult {
+                timestamp: super::get_unix_timestamp(),
+
+                stream_idx: self.stream_idx,
+
+                duration: start.elapsed().as_secs_f32(),
+
+                bytes_received: bytes_received,
+                packets_received: history.packets_received,
+                packets_lost: history.packets_lost,
+                packets_out_of_order: history.packets_out_of_order,
+                packets_duplicated: history.packets_duplicated,
+
+                unbroken_sequence: history.longest_unbroken_sequence,
+                jitter_seconds: history.longest_jitter_seconds,
+            })))
         }
 
         fn get_port(&self) -> super::BoxResult<u16> {

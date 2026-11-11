@@ -125,11 +125,11 @@ pub fn execute(args: ArgMatches) -> BoxResult<()> {
     let mut tcp_port_pool = tcp::receiver::TcpPortPool::new(
         args.value_of("tcp_port_pool").unwrap().to_string(),
         args.value_of("tcp6_port_pool").unwrap().to_string(),
-    );
+    )?;
     let mut udp_port_pool = udp::receiver::UdpPortPool::new(
         args.value_of("udp_port_pool").unwrap().to_string(),
         args.value_of("udp6_port_pool").unwrap().to_string(),
-    );
+    )?;
 
     let cpu_affinity_manager = Arc::new(Mutex::new(
         crate::utils::cpu_affinity::CpuAffinityManager::new(args.value_of("affinity").unwrap())?,
