@@ -353,7 +353,7 @@ local function dissect_udp_data(buffer, pinfo, tree_item)
 
   local info = "rperf UDP data: packet #" .. string.format("%d", packet_id) .. " (test " .. format_test_id_uuid(test_id_raw) .. ")"
   if ooo then
-    info = info .. ", out of order: " .. ooo.text
+    info = info .. " [out of order: " .. ooo.text .. "]"
   end
   pinfo.cols.info = info
 end
