@@ -236,7 +236,7 @@ fn main() {
         )
         .arg(
             Arg::with_name("nat_resolution_port")
-                .help("the UDP port used for reverse-NAT-traversal tracer datagrams; on the server this is where tracers are received (defaults to the control port, --port), and on the client this is where tracers are sent (defaults to the control port)")
+                .help("the UDP port for reverse-NAT-traversal tracer datagrams, used only in reverse-UDP tests; defaults to the same value as the control port (--port)")
                 .takes_value(true)
                 .long("nat-resolution-port")
                 .required(false)
