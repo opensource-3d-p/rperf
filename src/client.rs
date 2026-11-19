@@ -18,7 +18,7 @@
  * along with rperf.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use std::net::{IpAddr, Shutdown, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv6Addr, Shutdown, SocketAddr, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
@@ -67,7 +67,11 @@ const KILL_TIMEOUT: f64 = 5.0; //once testing finishes, allow a few seconds for 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn connect_to_server(address: &str, port: &u16) -> BoxResult<TcpStream> {
-    let destination = format!("[{}]:{}", address, port);
+    let destination = if address.parse::<Ipv6Addr>().is_ok() {
+        format!("[{}]:{}", address, port)
+    } else {
+        format!("{}:{}", address, port)
+    };
     log::info!("connecting to server at {}...", destination);
 
     let server_addr = destination.to_socket_addrs()?.next();
